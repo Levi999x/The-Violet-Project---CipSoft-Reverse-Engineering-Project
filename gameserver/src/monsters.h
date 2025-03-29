@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_MONSTERS_H_776E8327BCE2450EB7C4A260785E6C0D
+#define FS_MONSTERS_H_776E8327BCE2450EB7C4A260785E6C0D
 
 #include "creature.h"
 
@@ -42,7 +59,6 @@ class Loot {
 struct summonBlock_t {
 	std::string name;
 	uint32_t chance;
-	uint32_t delay;
 	uint32_t speed;
 	uint32_t max;
 	bool force = false;
@@ -57,33 +73,23 @@ struct spellBlock_t {
 	spellBlock_t(spellBlock_t&& other) :
 		spell(other.spell),
 		chance(other.chance),
-		delay(other.delay),
 		speed(other.speed),
 		range(other.range),
 		minCombatValue(other.minCombatValue),
 		maxCombatValue(other.maxCombatValue),
-		meleeEnergyCondition(other.meleeEnergyCondition),
-		meleeFireCondition(other.meleeFireCondition),
-		meleePoisonCondition(other.meleePoisonCondition),
 		combatSpell(other.combatSpell),
-		isMelee(other.isMelee),
-		updateLook(other.updateLook) {
+		isMelee(other.isMelee) {
 		other.spell = nullptr;
 	}
 
 	BaseSpell* spell = nullptr;
 	uint32_t chance = 100;
-	uint32_t delay = 1;
 	uint32_t speed = 2000;
 	uint32_t range = 0;
 	int32_t minCombatValue = 0;
 	int32_t maxCombatValue = 0;
-	int32_t meleePoisonCondition = 0;
-	int32_t meleeFireCondition = 0;
-	int32_t meleeEnergyCondition = 0;
 	bool combatSpell = false;
 	bool isMelee = false;
-	bool updateLook = false;
 };
 
 struct voiceBlock_t {
@@ -115,14 +121,10 @@ class MonsterType
 
 		uint64_t experience = 0;
 
-		uint32_t skillFactorPercent = 0; 
-		uint32_t skillNextLevel = 0; 
-		uint32_t skillAddCount = 0; 
-		uint32_t baseAttack = 0;
-		uint32_t baseSkill = 0;
 		uint32_t manaCost = 0;
 		uint32_t yellChance = 0;
 		uint32_t yellSpeedTicks = 0;
+		uint32_t staticAttackChance = 95;
 		uint32_t maxSummons = 0;
 		uint32_t changeTargetSpeed = 0;
 		uint32_t conditionImmunities = 0;
@@ -139,10 +141,6 @@ class MonsterType
 		int32_t health = 100;
 		int32_t healthMax = 100;
 		int32_t changeTargetChance = 0;
-		int32_t strategyNearestEnemy = 0;
-		int32_t strategyWeakestEnemy = 0;
-		int32_t strategyMostDamageEnemy = 0;
-		int32_t strategyRandomEnemy = 0;
 		int32_t defense = 0;
 		int32_t armor = 0;
 
@@ -158,9 +156,9 @@ class MonsterType
 		bool isIllusionable = false;
 		bool isSummonable = false;
 		bool hiddenHealth = false;
-		bool canWalkOnEnergy = false;
-		bool canWalkOnFire = false;
-		bool canWalkOnPoison = false;
+		bool canWalkOnEnergy = true;
+		bool canWalkOnFire = true;
+		bool canWalkOnPoison = true;
 
 		MonstersEvent_t eventType = MONSTERS_EVENT_NONE;
 	};
@@ -194,7 +192,6 @@ class MonsterSpell
 		std::string scriptName = "";
 
 		uint8_t chance = 100;
-		uint8_t delay = 0;
 		uint8_t range = 0;
 		uint8_t drunkenness = 0;
 
@@ -207,12 +204,13 @@ class MonsterSpell
 		int32_t length = 0;
 		int32_t spread = 0;
 		int32_t radius = 0;
+		int32_t ring = 0;
 		int32_t conditionMinDamage = 0;
 		int32_t conditionMaxDamage = 0;
 		int32_t conditionStartDamage = 0;
 		int32_t tickInterval = 0;
-		int32_t speedVariation = 0;
-		int32_t speedDelta = 0;
+		int32_t minSpeedChange = 0;
+		int32_t maxSpeedChange = 0;
 		int32_t duration = 0;
 
 		bool isScripted = false;
@@ -251,9 +249,7 @@ class Monsters
 	private:
 		ConditionDamage* getDamageCondition(ConditionType_t conditionType,
 		                                    int32_t maxDamage, int32_t minDamage, int32_t startDamage, uint32_t tickInterval);
-		ConditionDamage* getDamageCondition(ConditionType_t conditionType, int32_t cycle, int32_t count, int32_t maxCount, int32_t minCycle = 0);
-
-		bool deserializeSpell(MonsterType* mType, const pugi::xml_node& node, spellBlock_t& sb, const std::string& description = "");
+		bool deserializeSpell(const pugi::xml_node& node, spellBlock_t& sb, const std::string& description = "");
 
 		MonsterType* loadMonster(const std::string& file, const std::string& monsterName, bool reloading = false);
 
@@ -264,3 +260,5 @@ class Monsters
 
 		bool loaded = false;
 };
+
+#endif

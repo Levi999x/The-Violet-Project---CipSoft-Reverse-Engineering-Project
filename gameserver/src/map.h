@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_MAP_H_E3953D57C058461F856F5221D359DAFA
+#define FS_MAP_H_E3953D57C058461F856F5221D359DAFA
 
 #include "position.h"
 #include "item.h"
@@ -46,7 +63,7 @@ class AStarNodes
 		AStarNode* getNodeByPosition(uint32_t x, uint32_t y);
 
 		static int_fast32_t getMapWalkCost(AStarNode* node, const Position& neighborPos);
-		static int_fast32_t getTileWalkCost(Creature& creature, const Tile* tile);
+		static int_fast32_t getTileWalkCost(const Creature& creature, const Tile* tile);
 
 	private:
 		AStarNode nodes[MAX_NODES];
@@ -148,28 +165,6 @@ class QTreeLeafNode final : public QTreeNode
 		friend class QTreeNode;
 };
 
-struct SpawnMatrix
-{
-	~SpawnMatrix() {
-		delete[] entry;
-	}
-
-	SpawnMatrix(int32_t xmin, int32_t xmax, int32_t ymin, int32_t ymax) {
-		dx = xmax - xmin + 1;
-		this->xmin = xmin;
-		dy = ymax - ymin + 1;
-		this->ymin = ymin;
-		
-		entry = new int32_t[4 * dy * dx];
-	}
-
-	int32_t dx = 0;
-	int32_t dy = 0;
-	int32_t xmin = 0;
-	int32_t ymin = 0;
-	int32_t* entry = nullptr;
-};
-
 /**
   * Map class.
   * Holds all the actual map-data
@@ -183,14 +178,13 @@ class Map
 		static constexpr int32_t maxClientViewportX = 8;
 		static constexpr int32_t maxClientViewportY = 6;
 
-		uint32_t refreshMap() const;
+		uint32_t clean() const;
 
 		/**
 		  * Load a map.
 		  * \returns true if the map was loaded successfully
 		  */
 		bool loadMap(const std::string& identifier, bool loadHouses);
-		bool loadMapPart(const std::string& identifier, bool loadSpawns, bool replaceTiles);
 
 		/**
 		  * Save a map.
@@ -210,9 +204,9 @@ class Map
 		/**
 		  * Set a single tile.
 		  */
-		void setTile(uint16_t x, uint16_t y, uint8_t z, Tile* newTile, bool replaceExistingTiles = true);
-		void setTile(const Position& pos, Tile* newTile, bool replaceExistingTiles = true) {
-			setTile(pos.x, pos.y, pos.z, newTile, replaceExistingTiles);
+		void setTile(uint16_t x, uint16_t y, uint8_t z, Tile* newTile);
+		void setTile(const Position& pos, Tile* newTile) {
+			setTile(pos.x, pos.y, pos.z, newTile);
 		}
 
 		/**
@@ -230,7 +224,7 @@ class Map
 		  * \param extendedPos If true, the creature will in first-hand be placed 2 tiles away
 		  * \param forceLogin If true, placing the creature will not fail because of obstacles (creatures/chests)
 		  */
-		bool placeCreature(const Position& centerPos, Creature* creature, bool forceLogin = false);
+		bool placeCreature(const Position& centerPos, Creature* creature, bool extendedPos = false, bool forceLogin = false);
 
 		void moveCreature(Creature& creature, Tile& newTile, bool forceTeleport = false);
 
@@ -247,14 +241,34 @@ class Map
 		  *	\param toPos Destination point
 		  *	\param rangex maximum allowed range horizontally
 		  *	\param rangey maximum allowed range vertically
+		  *	\param checkLineOfSight checks if there is any blocking objects in the way
 		  *	\param sameFloor checks if the destination is on same floor
 		  *	\returns The result if you can throw there or not
 		  */
-		bool canThrowObjectTo(const Position& fromPos, const Position& toPos, bool multiFloor = false) const;
+		bool canThrowObjectTo(const Position& fromPos, const Position& toPos, bool checkLineOfSight = true, bool sameFloor = false,
+		                      int32_t rangex = Map::maxClientViewportX, int32_t rangey = Map::maxClientViewportY) const;
+
+		/**
+		  * Checks if there are no obstacles on that position
+		  *	\param blockFloor counts the ground tile as an obstacle
+		  *	\returns The result if there is an obstacle or not
+		  */
+		bool isTileClear(uint16_t x, uint16_t y, uint8_t z, bool blockFloor = false) const;
+
+		/**
+		  * Checks if path is clear from fromPos to toPos
+		  * Notice: This only checks a straight line if the path is clear, for path finding use getPathTo.
+		  *	\param fromPos from Source point
+		  *	\param toPos Destination point
+		  *	\param sameFloor checks if the destination is on same floor
+		  *	\returns The result if there is no obstacles
+		  */
+		bool isSightClear(const Position& fromPos, const Position& toPos, bool sameFloor = false) const;
+		bool checkSightLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint8_t z) const;
 
 		const Tile* canWalkTo(const Creature& creature, const Position& pos) const;
 
-		bool getPathMatching(Creature& creature, std::vector<Direction>& dirList,
+		bool getPathMatching(const Creature& creature, std::vector<Direction>& dirList,
 		                     const FrozenPathingConditionCall& pathCondition, const FindPathParams& fpp) const;
 
 		std::map<std::string, Position> waypoints;
@@ -287,5 +301,6 @@ class Map
 
 		friend class Game;
 		friend class IOMap;
-		friend class IOMapSerialize;
 };
+
+#endif

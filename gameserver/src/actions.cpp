@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -10,14 +26,12 @@
 #include "game.h"
 #include "pugicast.h"
 #include "spells.h"
-#include "events.h"
 #include <fmt/format.h>
 
 extern Game g_game;
 extern Spells* g_spells;
 extern Actions* g_actions;
 extern ConfigManager g_config;
-extern Events* g_events;
 
 Actions::Actions() :
 	scriptInterface("Action Interface")
@@ -265,11 +279,11 @@ ReturnValue Actions::canUseFar(const Creature* creature, const Position& toPos, 
 		return creaturePos.z > toPos.z ? RETURNVALUE_FIRSTGOUPSTAIRS : RETURNVALUE_FIRSTGODOWNSTAIRS;
 	}
 
-	if (!Position::areInRange<7, 5>(toPos, creaturePos)) {
+	if (!Position::areInRange<Map::maxClientViewportX - 1, Map::maxClientViewportY - 1>(toPos, creaturePos)) {
 		return RETURNVALUE_TOOFARAWAY;
 	}
 
-	if (checkLineOfSight && !g_game.canThrowObjectTo(creaturePos, toPos, false)) {
+	if (checkLineOfSight && !g_game.canThrowObjectTo(creaturePos, toPos, checkLineOfSight, checkFloor)) {
 		return RETURNVALUE_CANNOTTHROW;
 	}
 
@@ -301,7 +315,7 @@ Action* Actions::getAction(const Item* item)
 	return g_spells->getRuneSpell(item->getID());
 }
 
-ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_t index, Item* item)
+ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_t index, Item* item, bool isHotkey)
 {
 	if (Door* door = item->getDoor()) {
 		if (!door->canUse(player)) {
@@ -312,31 +326,34 @@ ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_
 	Action* action = getAction(item);
 	if (action) {
 		if (action->isScripted()) {
-			if (action->executeUse(player, item, pos, nullptr, pos)) {
+			if (action->executeUse(player, item, pos, nullptr, pos, isHotkey)) {
 				return RETURNVALUE_NOERROR;
 			}
 
 			if (item->isRemoved()) {
 				return RETURNVALUE_CANNOTUSETHISOBJECT;
 			}
+		} else if (action->function && action->function(player, item, pos, nullptr, pos, isHotkey)) {
+			return RETURNVALUE_NOERROR;
 		}
 	}
 
 	if (BedItem* bed = item->getBed()) {
 		if (!bed->canUse(player)) {
 			if (!bed->getHouse()) {
-				return RETURNVALUE_CANNOTUSETHISOBJECT;
+				return RETURNVALUE_YOUCANNOTUSETHISBED;
 			}
 
 			if (!player->isPremium()) {
 				return RETURNVALUE_YOUNEEDPREMIUMACCOUNT;
 			}
-
 			return RETURNVALUE_CANNOTUSETHISOBJECT;
 		}
 
 		if (bed->trySleep(player)) {
+			player->setBedItem(bed);
 			bed->sleep(player);
+			//g_game.sendOfflineTrainingDialog(player);
 		}
 
 		return RETURNVALUE_NOERROR;
@@ -347,28 +364,17 @@ ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_
 
 		//depot container
 		if (DepotLocker* depot = container->getDepotLocker()) {
-			DepotLocker* myDepotLocker = player->getDepotLocker(depot->getDepotId(), true);
+			DepotLocker* myDepotLocker = player->getDepotLocker(depot->getDepotId());
+			myDepotLocker->setParent(depot->getParent()->getTile());
 			openContainer = myDepotLocker;
-			player->setLastDepotId(depot->getDepotId());
-			player->currentDepotItem = depot;
-			player->currentDepotId = depot->getDepotId();
-
-			if (myDepotLocker->getItemTypeCount(ITEM_DEPOT) == 0) {
-				myDepotLocker->addItem(Item::CreateItem(ITEM_DEPOT, 1));
-			}
-
-			// This happens if the player logs in in a depot tile
-			if (!player->inDepot) {
-				player->toggleInDepot();
-			}
 		} else {
 			openContainer = container;
 		}
 
-		/*uint32_t corpseOwner = container->getCorpseOwner();
+		uint32_t corpseOwner = container->getCorpseOwner();
 		if (corpseOwner != 0 && !player->canOpenCorpse(corpseOwner)) {
 			return RETURNVALUE_YOUARENOTTHEOWNER;
-		}*/
+		}
 
 		//open/close container
 		int32_t oldContainerId = player->getContainerID(openContainer);
@@ -396,25 +402,47 @@ ReturnValue Actions::internalUseItem(Player* player, const Position& pos, uint8_
 		return RETURNVALUE_NOERROR;
 	}
 
-	if (g_events->eventPlayerOnUseItem(player, item)) {
-		return RETURNVALUE_NOTPOSSIBLE;
-	}
-
 	return RETURNVALUE_CANNOTUSETHISOBJECT;
 }
 
-bool Actions::useItem(Player* player, const Position& pos, uint8_t index, Item* item)
+
+static void showUseHotkeyMessage(Player* player, const Item* item, uint32_t count)
 {
+	const ItemType& it = Item::items[item->getID()];
+	if (!it.showCount) {
+		player->sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("Using one of {:s}...",  item->getName()));
+	} else if (count == 1) {
+		player->sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("Using the last {:s}...",  item->getName()));
+	} else {
+		player->sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("Using one of {:d} {:s}...", count, item->getPluralName()));
+	}
+}
+
+bool Actions::useItem(Player* player, const Position& pos, uint8_t index, Item* item, bool isHotkey)
+{
+	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::ACTIONS_DELAY_INTERVAL));
+
+	if (isHotkey) {
+		uint16_t subType = item->getSubType();
+		showUseHotkeyMessage(player, item, player->getItemTypeCount(item->getID(), subType != item->getItemCount() ? subType : -1));
+	}
+
 	if (g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_MOVE_HOUSE_ITEMS)) {
-		if (const HouseTile* const houseTile = dynamic_cast<const HouseTile*>(item->getTile())) {
-			if (!item->getTopParent()->getCreature() && !houseTile->getHouse()->isInvited(player)) {
+		if (HouseTile* houseTile = dynamic_cast<HouseTile*>(item->getTile())) {
+			House* house = houseTile->getHouse();
+			if (house && !house->isInvited(player)) {
 				player->sendCancelMessage(RETURNVALUE_PLAYERISNOTINVITED);
 				return false;
 			}
 		}
 	}
 
-	ReturnValue ret = internalUseItem(player, pos, index, item);
+	ReturnValue ret = internalUseItem(player, pos, index, item, isHotkey);
+	if (ret == RETURNVALUE_YOUCANNOTUSETHISBED) {
+		g_game.internalCreatureSay(player, TALKTYPE_MONSTER_SAY, getReturnMessage(ret), false);
+		return false;
+	}
+
 	if (ret != RETURNVALUE_NOERROR) {
 		player->sendCancelMessage(ret);
 		return false;
@@ -424,8 +452,10 @@ bool Actions::useItem(Player* player, const Position& pos, uint8_t index, Item* 
 }
 
 bool Actions::useItemEx(Player* player, const Position& fromPos, const Position& toPos,
-                        uint8_t toStackPos, uint16_t toSpriteId, Item* item, Creature* creature/* = nullptr*/)
+                        uint8_t toStackPos, Item* item, bool isHotkey, Creature* creature/* = nullptr*/)
 {
+	player->setNextAction(OTSYS_TIME() + g_config.getNumber(ConfigManager::EX_ACTIONS_DELAY_INTERVAL));
+
 	Action* action = getAction(item);
 	if (!action) {
 		player->sendCancelMessage(RETURNVALUE_CANNOTUSETHISOBJECT);
@@ -438,48 +468,12 @@ bool Actions::useItemEx(Player* player, const Position& fromPos, const Position&
 		return false;
 	}
 
-	Thing* target = action->getTarget(player, creature, toPos, toStackPos);
-	if (target) {
-		// ** OTC related fix only ** //
-		// OTC should not allow using items on splashes like classic Tibia client
-		if (Item::items.getItemIdByClientId(toSpriteId).isSplash()) {
-			if (Item* item = target->getItem()) {
-				toSpriteId = Item::items.getItemType(item->getID()).clientId;
-			}
-		}
-
-		// ** Tibia Client related fix only ** //
-		if (toSpriteId > 99 && toPos == player->getPosition() || target->getCreature()) {
-			toSpriteId = 99; // Override use in creature instead
-		}
-
-		if (target->getCreature() && toSpriteId > 99) {
-			player->sendCancelMessage(RETURNVALUE_NOTPOSSIBLE);
-			return false;
-		}
-
-		if (const Item* targetItem = target->getItem()) {
-			if (Item::items[targetItem->getID()].clientId != toSpriteId) {
-				player->sendCancelMessage(RETURNVALUE_NOTPOSSIBLE);
-				return false;
-			}
-		}
+	if (isHotkey) {
+		uint16_t subType = item->getSubType();
+		showUseHotkeyMessage(player, item, player->getItemTypeCount(item->getID(), subType != item->getItemCount() ? subType : -1));
 	}
 
-	if (toPos == player->getPosition()) {
-		target = player;
-	}
-	
-	if (g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_MOVE_HOUSE_ITEMS)) {
-		if (const HouseTile* const houseTile = dynamic_cast<const HouseTile*>(item->getTile())) {
-			if (!item->getTopParent()->getCreature() && !houseTile->getHouse()->isInvited(player)) {
-				player->sendCancelMessage(RETURNVALUE_PLAYERISNOTINVITED);
-				return false;
-			}
-		}
-	}
-
-	if (action->executeUse(player, item, fromPos, target, toPos)) {
+	if (action->executeUse(player, item, fromPos, action->getTarget(player, creature, toPos, toStackPos), toPos, isHotkey)) {
 		return true;
 	}
 
@@ -491,7 +485,7 @@ bool Actions::useItemEx(Player* player, const Position& fromPos, const Position&
 }
 
 Action::Action(LuaScriptInterface* interface) :
-	Event(interface), allowFarUse(false), checkFloor(true), checkLineOfSight(true) {}
+	Event(interface), function(nullptr), allowFarUse(false), checkFloor(true), checkLineOfSight(true) {}
 
 bool Action::configureEvent(const pugi::xml_node& node)
 {
@@ -510,6 +504,35 @@ bool Action::configureEvent(const pugi::xml_node& node)
 		checkFloor = checkFloorAttr.as_bool();
 	}
 
+	return true;
+}
+
+namespace {
+
+bool enterMarket(Player*, Item*, const Position&, Thing*, const Position&, bool)
+{
+
+	//player->sendMarketEnter(player->getLastDepotId());
+	return true;
+}
+
+}
+
+bool Action::loadFunction(const pugi::xml_attribute& attr, bool isScripted)
+{
+	const char* functionName = attr.as_string();
+	if (strcasecmp(functionName, "market") == 0) {
+		function = enterMarket;
+	} else {
+		if (!isScripted) {
+			std::cout << "[Warning - Action::loadFunction] Function \"" << functionName << "\" does not exist." << std::endl;
+			return false;
+		}
+	}
+
+	if (!isScripted) {
+		scripted = false;
+	}
 	return true;
 }
 
@@ -534,9 +557,9 @@ Thing* Action::getTarget(Player* player, Creature* targetCreature, const Positio
 	return g_game.internalGetThing(player, toPosition, toStackPos, 0, STACKPOS_USETARGET);
 }
 
-bool Action::executeUse(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition)
+bool Action::executeUse(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition, bool isHotkey)
 {
-	//onUse(player, item, fromPosition, target, toPosition)
+	//onUse(player, item, fromPosition, target, toPosition, isHotkey)
 	if (!scriptInterface->reserveScriptEnv()) {
 		std::cout << "[Error - Action::executeUse] Call stack overflow" << std::endl;
 		return false;
@@ -558,5 +581,6 @@ bool Action::executeUse(Player* player, Item* item, const Position& fromPosition
 	LuaScriptInterface::pushThing(L, target);
 	LuaScriptInterface::pushPosition(L, toPosition);
 
-	return scriptInterface->callFunction(5);
+	LuaScriptInterface::pushBoolean(L, isHotkey);
+	return scriptInterface->callFunction(6);
 }

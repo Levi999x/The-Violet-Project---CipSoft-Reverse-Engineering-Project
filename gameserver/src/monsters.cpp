@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -90,19 +106,7 @@ ConditionDamage* Monsters::getDamageCondition(ConditionType_t conditionType,
 	return condition;
 }
 
-ConditionDamage* Monsters::getDamageCondition(ConditionType_t conditionType, int32_t cycle, int32_t count, int32_t maxCount, int32_t minCycle/* = 0*/)
-{
-	ConditionDamage* condition = static_cast<ConditionDamage*>(Condition::createCondition(CONDITIONID_COMBAT, conditionType, 0, 0));
-	condition->setParam(CONDITION_PARAM_CYCLE, cycle);
-	condition->setParam(CONDITION_PARAM_COUNT, count);
-	condition->setParam(CONDITION_PARAM_MAX_COUNT, maxCount);
-	if (minCycle > 0) {
-		condition->setParam(CONDITION_PARAM_MINCYCLE, minCycle);
-	}
-	return condition;
-}
-
-bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, spellBlock_t& sb, const std::string& description)
+bool Monsters::deserializeSpell(const pugi::xml_node& node, spellBlock_t& sb, const std::string& description)
 {
 	std::string name;
 	std::string scriptName;
@@ -124,9 +128,12 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 	}
 
 	if ((attr = node.attribute("chance"))) {
-		sb.chance = pugi::cast<uint32_t>(attr.value());
-	} else if ((attr = node.attribute("delay"))) {
-		sb.delay = pugi::cast<uint32_t>(attr.value());
+		uint32_t chance = pugi::cast<uint32_t>(attr.value());
+		if (chance > 100) {
+			chance = 100;
+			std::cout << "[Warning - Monsters::deserializeSpell] " << description << " - Chance value out of bounds for spell: " << name << std::endl;
+		}
+		sb.chance = chance;
 	} else if (asLowerCaseString(name) != "melee") {
 		std::cout << "[Warning - Monsters::deserializeSpell] " << description << " - Missing chance value on non-melee spell: " << name << std::endl;
 	}
@@ -170,7 +177,6 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 
 		if ((attr = node.attribute("target"))) {
 			needTarget = attr.as_bool();
-			sb.updateLook = true;
 		}
 
 		std::unique_ptr<CombatSpell> combatSpellPtr(new CombatSpell(nullptr, needTarget, needDirection));
@@ -189,7 +195,6 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 		if ((attr = node.attribute("length"))) {
 			int32_t length = pugi::cast<int32_t>(attr.value());
 			if (length > 0) {
-				sb.updateLook = true;
 				int32_t spread = 3;
 
 				//need direction spell
@@ -210,7 +215,6 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 
 			//target spell
 			if ((attr = node.attribute("target"))) {
-				sb.updateLook = true;
 				needTarget = attr.as_bool();
 			}
 
@@ -219,32 +223,28 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			combat->setArea(area);
 		}
 
+		if ((attr = node.attribute("ring"))) {
+			int32_t ring = pugi::cast<int32_t>(attr.value());
+
+			//target spell
+			if ((attr = node.attribute("target"))) {
+				needTarget = attr.as_bool();
+			}
+
+			AreaCombat* area = new AreaCombat();
+			area->setupAreaRing(ring);
+			combat->setArea(area);
+		}
+
 		std::string tmpName = asLowerCaseString(name);
 
 		if (tmpName == "melee") {
 			sb.isMelee = true;
-			sb.updateLook = true;
 
 			pugi::xml_attribute attackAttribute, skillAttribute;
 			if ((attackAttribute = node.attribute("attack")) && (skillAttribute = node.attribute("skill"))) {
-				mType->info.baseSkill = pugi::cast<uint32_t>(skillAttribute.value());
-				mType->info.baseAttack = pugi::cast<uint32_t>(attackAttribute.value());
-
-				if ((attr = node.attribute("skillfactor"))) {
-					mType->info.skillFactorPercent = pugi::cast<uint32_t>(attr.value());
-					if (mType->info.skillFactorPercent < 1000) {
-						std::cout << "[Monsters::deserializeSpell]: " << mType->name << " - skill factor lower than 1000" << std::endl;
-						mType->info.skillFactorPercent = 1000;
-					}
-				}
-
-				if ((attr = node.attribute("skillnextlevel"))) {
-					mType->info.skillNextLevel = pugi::cast<uint32_t>(attr.value());
-				}
-
-				if ((attr = node.attribute("skilladdcount"))) {
-					mType->info.skillAddCount = pugi::cast<uint32_t>(attr.value());
-				}
+				sb.minCombatValue = 0;
+				sb.maxCombatValue = -Weapons::getMaxMeleeDamage(pugi::cast<int32_t>(skillAttribute.value()), pugi::cast<int32_t>(attackAttribute.value()));
 			}
 
 			ConditionType_t conditionType = CONDITION_NONE;
@@ -270,6 +270,30 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 				minDamage = pugi::cast<int32_t>(attr.value());
 				maxDamage = minDamage;
 				tickInterval = 10000;
+			} else if ((attr = node.attribute("drown"))) {
+				conditionType = CONDITION_DROWN;
+
+				minDamage = pugi::cast<int32_t>(attr.value());
+				maxDamage = minDamage;
+				tickInterval = 5000;
+			} else if ((attr = node.attribute("freeze"))) {
+				conditionType = CONDITION_FREEZING;
+
+				minDamage = pugi::cast<int32_t>(attr.value());
+				maxDamage = minDamage;
+				tickInterval = 8000;
+			} else if ((attr = node.attribute("dazzle"))) {
+				conditionType = CONDITION_DAZZLED;
+
+				minDamage = pugi::cast<int32_t>(attr.value());
+				maxDamage = minDamage;
+				tickInterval = 10000;
+			} else if ((attr = node.attribute("curse"))) {
+				conditionType = CONDITION_CURSED;
+
+				minDamage = pugi::cast<int32_t>(attr.value());
+				maxDamage = minDamage;
+				tickInterval = 4000;
 			} else if ((attr = node.attribute("bleed")) || (attr = node.attribute("physical"))) {
 				conditionType = CONDITION_BLEEDING;
 				tickInterval = 4000;
@@ -283,13 +307,7 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			}
 
 			if (conditionType != CONDITION_NONE) {
-				ConditionDamage* condition = getDamageCondition(conditionType, maxDamage, minDamage, 0, tickInterval);
-				combat->addCondition(condition);
-			}
-
-			if ((attr = node.attribute("poisoncycles"))) {
-				int32_t cycle = pugi::cast<int32_t>(attr.value());
-				ConditionDamage* condition = getDamageCondition(CONDITION_POISON, cycle, 3, 3, cycle / 2);
+				Condition* condition = getDamageCondition(conditionType, maxDamage, minDamage, 0, tickInterval);
 				combat->addCondition(condition);
 			}
 
@@ -301,11 +319,7 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 		} else if (tmpName == "physical") {
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_PHYSICALDAMAGE);
 			combat->setParam(COMBAT_PARAM_BLOCKARMOR, 1);
-			combat->setParam(COMBAT_PARAM_BLOCKSHIELD, 1);
-
-			if (sb.range > 1) {
-				combat->setOrigin(ORIGIN_RANGED);
-			}
+			combat->setOrigin(ORIGIN_RANGED);
 		} else if (tmpName == "bleed") {
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_PHYSICALDAMAGE);
 		} else if (tmpName == "poison" || tmpName == "earth") {
@@ -314,6 +328,14 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_FIREDAMAGE);
 		} else if (tmpName == "energy") {
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_ENERGYDAMAGE);
+		} else if (tmpName == "drown") {
+			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_DROWNDAMAGE);
+		} else if (tmpName == "ice") {
+			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_ICEDAMAGE);
+		} else if (tmpName == "holy") {
+			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_HOLYDAMAGE);
+		} else if (tmpName == "death") {
+			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_DEATHDAMAGE);
 		} else if (tmpName == "lifedrain") {
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_LIFEDRAIN);
 		} else if (tmpName == "manadrain") {
@@ -322,27 +344,40 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			combat->setParam(COMBAT_PARAM_TYPE, COMBAT_HEALING);
 			combat->setParam(COMBAT_PARAM_AGGRESSIVE, 0);
 		} else if (tmpName == "speed") {
-			int32_t speedDelta = 0;
-			int32_t speedVariation = 0;
+			int32_t minSpeedChange = 0;
+			int32_t maxSpeedChange = 0;
 			int32_t duration = 10000;
 
 			if ((attr = node.attribute("duration"))) {
 				duration = pugi::cast<int32_t>(attr.value());
 			}
-			
-			if ((attr = node.attribute("speed"))) {
-				speedDelta = pugi::cast<int32_t>(attr.value());
 
-				if ((attr = node.attribute("speedvariation"))) {
-					speedVariation = pugi::cast<int32_t>(attr.value());
+			if ((attr = node.attribute("speedchange"))) {
+				minSpeedChange = pugi::cast<int32_t>(attr.value());
+			} else if ((attr = node.attribute("minspeedchange"))) {
+				minSpeedChange = pugi::cast<int32_t>(attr.value());
+
+				if ((attr = node.attribute("maxspeedchange"))) {
+					maxSpeedChange = pugi::cast<int32_t>(attr.value());
 				}
-			} else {
-				std::cout << "[Monsters::deserializeSpell]: missing speed attribute in monster file " << mType->name << std::endl;
-				return false;
+
+				if (minSpeedChange == 0) {
+					std::cout << "[Error - Monsters::deserializeSpell] - " << description << " - missing speedchange/minspeedchange value" << std::endl;
+					return false;
+				}
+
+				if (maxSpeedChange == 0) {
+					maxSpeedChange = minSpeedChange; // static speedchange value
+				}
+			}
+
+			if (minSpeedChange < -1000) {
+				std::cout << "[Warning - Monsters::deserializeSpell] - " << description << " - you cannot reduce a creatures speed below -1000 (100%)" << std::endl;
+				minSpeedChange = -1000;
 			}
 
 			ConditionType_t conditionType;
-			if (speedDelta >= 0) {
+			if (minSpeedChange >= 0) {
 				conditionType = CONDITION_HASTE;
 				combat->setParam(COMBAT_PARAM_AGGRESSIVE, 0);
 			} else {
@@ -350,8 +385,7 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			}
 
 			ConditionSpeed* condition = static_cast<ConditionSpeed*>(Condition::createCondition(CONDITIONID_COMBAT, conditionType, duration, 0));
-			condition->setParam(CONDITION_PARAM_SPEED, speedDelta);
-			condition->setParam(CONDITION_PARAM_SPEEDVARIATION, speedVariation);
+			condition->setFormulaVars(minSpeedChange / 1000.0, 0, maxSpeedChange / 1000.0, 0);
 			combat->addCondition(condition);
 		} else if (tmpName == "outfit") {
 			int32_t duration = 10000;
@@ -361,10 +395,10 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			}
 
 			if ((attr = node.attribute("monster"))) {
-				MonsterType* outfitMonsterType = g_monsters.getMonsterType(attr.as_string());
-				if (outfitMonsterType) {
+				MonsterType* mType = g_monsters.getMonsterType(attr.as_string());
+				if (mType) {
 					ConditionOutfit* condition = static_cast<ConditionOutfit*>(Condition::createCondition(CONDITIONID_COMBAT, CONDITION_OUTFIT, duration, 0));
-					condition->setOutfit(outfitMonsterType->info.outfit);
+					condition->setOutfit(mType->info.outfit);
 					combat->setParam(COMBAT_PARAM_AGGRESSIVE, 0);
 					combat->addCondition(condition);
 				}
@@ -409,6 +443,10 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			combat->setParam(COMBAT_PARAM_CREATEITEM, ITEM_ENERGYFIELD_PVP);
 		} else if (tmpName == "firecondition" || tmpName == "energycondition" ||
 				   tmpName == "earthcondition" || tmpName == "poisoncondition" ||
+				   tmpName == "icecondition" || tmpName == "freezecondition" ||
+				   tmpName == "deathcondition" || tmpName == "cursecondition" ||
+				   tmpName == "holycondition" || tmpName == "dazzlecondition" ||
+				   tmpName == "drowncondition" || tmpName == "bleedcondition" ||
 				   tmpName == "physicalcondition") {
 			ConditionType_t conditionType = CONDITION_NONE;
 			uint32_t tickInterval = 2000;
@@ -421,6 +459,18 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 				tickInterval = 4000;
 			} else if (tmpName == "energycondition") {
 				conditionType = CONDITION_ENERGY;
+				tickInterval = 10000;
+			} else if (tmpName == "drowncondition") {
+				conditionType = CONDITION_DROWN;
+				tickInterval = 5000;
+			} else if (tmpName == "freezecondition" || tmpName == "icecondition") {
+				conditionType = CONDITION_FREEZING;
+				tickInterval = 10000;
+			} else if (tmpName == "cursecondition" || tmpName == "deathcondition") {
+				conditionType = CONDITION_CURSED;
+				tickInterval = 4000;
+			} else if (tmpName == "dazzlecondition" || tmpName == "holycondition") {
+				conditionType = CONDITION_DAZZLED;
 				tickInterval = 10000;
 			} else if (tmpName == "physicalcondition" || tmpName == "bleedcondition") {
 				conditionType = CONDITION_BLEEDING;
@@ -445,41 +495,8 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 				}
 			}
 
-			int32_t cycle = 0;
-			if ((attr = node.attribute("cycle"))) {
-				cycle = std::abs(pugi::cast<int32_t>(attr.value()));
-			}
-
-			int32_t minCycle = 0;
-			if ((attr = node.attribute("mincycle"))) {
-				minCycle = std::abs(pugi::cast<int32_t>(attr.value()));
-			}
-
-			if (cycle > 0) {
-				int32_t count = 0;
-
-				if (conditionType == CONDITION_POISON) {
-					count = 3;
-				} else if (conditionType == CONDITION_FIRE) {
-					count = 8;
-					cycle /= 10;
-					if (minCycle > 0) {
-						minCycle /= 10;
-					}
-				} else if (conditionType == CONDITION_ENERGY) {
-					count = 10;
-					cycle /= 20;
-					if (minCycle > 0) {
-						minCycle /= 20;
-					}
-				}
-
-				Condition* condition = getDamageCondition(conditionType, cycle, count, count, minCycle);
-				combat->addCondition(condition);
-			} else {
-				Condition* condition = getDamageCondition(conditionType, maxDamage, minDamage, startDamage, tickInterval);
-				combat->addCondition(condition);
-			}
+			Condition* condition = getDamageCondition(conditionType, maxDamage, minDamage, startDamage, tickInterval);
+			combat->addCondition(condition);
 		} else if (tmpName == "strength") {
 			//
 		} else if (tmpName == "effect") {
@@ -489,9 +506,7 @@ bool Monsters::deserializeSpell(MonsterType* mType, const pugi::xml_node& node, 
 			return false;
 		}
 
-		if (!sb.isMelee) {
-			combat->setPlayerCombatValues(COMBAT_FORMULA_DAMAGE, sb.minCombatValue, 0, sb.maxCombatValue, 0);
-		}
+		combat->setPlayerCombatValues(COMBAT_FORMULA_DAMAGE, sb.minCombatValue, 0, sb.maxCombatValue, 0);
 		combatSpell = new CombatSpell(combat, needTarget, needDirection);
 
 		for (auto attributeNode : node.children()) {
@@ -543,8 +558,6 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 
 	if (spell->chance > 100) {
 		sb.chance = 100;
-	} else if (spell->delay > 0) {
-		sb.delay = spell->delay;
 	} else {
 		sb.chance = spell->chance;
 	}
@@ -602,6 +615,28 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 			combat->setArea(area);
 		}
 
+		if (spell->ring > 0) {
+			AreaCombat* area = new AreaCombat();
+			area->setupAreaRing(spell->ring);
+			combat->setArea(area);
+		}
+
+		if (spell->conditionType != CONDITION_NONE) {
+			ConditionType_t conditionType = spell->conditionType;
+
+			uint32_t tickInterval = 2000;
+			if (spell->tickInterval != 0) {
+				tickInterval = spell->tickInterval;
+			}
+
+			int32_t conMinDamage = std::abs(spell->conditionMinDamage);
+			int32_t conMaxDamage = std::abs(spell->conditionMaxDamage);
+			int32_t startDamage = std::abs(spell->conditionStartDamage);
+
+			Condition* condition = getDamageCondition(conditionType, conMaxDamage, conMinDamage, startDamage, tickInterval);
+			combat->addCondition(condition);
+		}
+
 		std::string tmpName = asLowerCaseString(spell->name);
 
 		if (tmpName == "melee") {
@@ -610,21 +645,6 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 			if (spell->attack > 0 && spell->skill > 0) {
 				sb.minCombatValue = 0;
 				sb.maxCombatValue = -Weapons::getMaxMeleeDamage(spell->skill, spell->attack);
-			}
-
-			if (spell->conditionType != CONDITION_NONE) {
-				ConditionType_t conditionType = spell->conditionType;
-
-				int32_t minDamage = spell->conditionMinDamage;
-				int32_t maxDamage = minDamage;
-
-				uint32_t tickInterval = 2000;
-				if (spell->tickInterval != 0) {
-					tickInterval = spell->tickInterval;
-				}
-
-				Condition* condition = getDamageCondition(conditionType, maxDamage, minDamage, spell->conditionStartDamage, tickInterval);
-				combat->addCondition(condition);
 			}
 
 			sb.range = 1;
@@ -646,16 +666,35 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 			}
 			combat->setParam(COMBAT_PARAM_TYPE, spell->combatType);
 		} else if (tmpName == "speed") {
-			const int32_t speedVariation = spell->speedVariation;
-			const int32_t speedDelta = spell->speedDelta;
+			int32_t minSpeedChange = 0;
+			int32_t maxSpeedChange = 0;
 			int32_t duration = 10000;
 
 			if (spell->duration != 0) {
 				duration = spell->duration;
 			}
 
+			if (spell->minSpeedChange != 0) {
+				minSpeedChange = spell->minSpeedChange;
+			} else {
+				std::cout << "[Error - Monsters::deserializeSpell] - " << description << " - missing speedchange/minspeedchange value" << std::endl;
+				delete spell;
+				return false;
+			}
+
+			if (minSpeedChange < -1000) {
+				std::cout << "[Warning - Monsters::deserializeSpell] - " << description << " - you cannot reduce a creatures speed below -1000 (100%)" << std::endl;
+				minSpeedChange = -1000;
+			}
+
+			if (spell->maxSpeedChange != 0) {
+				maxSpeedChange = spell->maxSpeedChange;
+			} else {
+				maxSpeedChange = minSpeedChange; // static speedchange value
+			}
+
 			ConditionType_t conditionType;
-			if (speedDelta >= 0) {
+			if (minSpeedChange >= 0) {
 				conditionType = CONDITION_HASTE;
 				combat->setParam(COMBAT_PARAM_AGGRESSIVE, 0);
 			} else {
@@ -663,8 +702,7 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 			}
 
 			ConditionSpeed* condition = static_cast<ConditionSpeed*>(Condition::createCondition(CONDITIONID_COMBAT, conditionType, duration, 0));
-			condition->setParam(CONDITION_PARAM_SPEED, speedDelta);
-			condition->setParam(CONDITION_PARAM_SPEEDVARIATION, speedVariation);
+			condition->setFormulaVars(minSpeedChange / 1000.0, 0, maxSpeedChange / 1000.0, 0);
 			combat->addCondition(condition);
 		} else if (tmpName == "outfit") {
 			int32_t duration = 10000;
@@ -708,32 +746,9 @@ bool Monsters::deserializeSpell(MonsterSpell* spell, spellBlock_t& sb, const std
 		} else if (tmpName == "energyfield") {
 			combat->setParam(COMBAT_PARAM_CREATEITEM, ITEM_ENERGYFIELD_PVP);
 		} else if (tmpName == "condition") {
-			uint32_t tickInterval = 2000;
-
 			if (spell->conditionType == CONDITION_NONE) {
 				std::cout << "[Error - Monsters::deserializeSpell] - " << description << " - Condition is not set for: " << spell->name << std::endl;
 			}
-
-			if (spell->tickInterval != 0) {
-				int32_t value = spell->tickInterval;
-				if (value > 0) {
-					tickInterval = value;
-				}
-			}
-
-			const int32_t minDamage = std::abs(spell->conditionMinDamage);
-			const int32_t maxDamage = std::abs(spell->conditionMaxDamage);
-			int32_t startDamage = 0;
-
-			if (spell->conditionStartDamage != 0) {
-				int32_t value = std::abs(spell->conditionStartDamage);
-				if (value <= minDamage) {
-					startDamage = value;
-				}
-			}
-
-			Condition* condition = getDamageCondition(spell->conditionType, maxDamage, minDamage, startDamage, tickInterval);
-			combat->addCondition(condition);
 		} else if (tmpName == "strength") {
 			//
 		} else if (tmpName == "effect") {
@@ -906,6 +921,14 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 				mType->info.canPushItems = attr.as_bool();
 			} else if (strcasecmp(attrName, "canpushcreatures") == 0) {
 				mType->info.canPushCreatures = attr.as_bool();
+			} else if (strcasecmp(attrName, "staticattack") == 0) {
+				uint32_t staticAttack = pugi::cast<uint32_t>(attr.value());
+				if (staticAttack > 100) {
+					std::cout << "[Warning - Monsters::loadMonster] staticattack greater than 100. " << file << std::endl;
+					staticAttack = 100;
+				}
+
+				mType->info.staticAttackChance = staticAttack;
 			} else if (strcasecmp(attrName, "lightlevel") == 0) {
 				mType->info.light.level = pugi::cast<uint16_t>(attr.value());
 			} else if (strcasecmp(attrName, "lightcolor") == 0) {
@@ -945,6 +968,8 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 	if ((node = monsterNode.child("targetchange"))) {
 		if ((attr = node.attribute("speed")) || (attr = node.attribute("interval"))) {
 			mType->info.changeTargetSpeed = pugi::cast<uint32_t>(attr.value());
+		} else {
+			std::cout << "[Warning - Monsters::loadMonster] Missing targetchange speed. " << file << std::endl;
 		}
 
 		if ((attr = node.attribute("chance"))) {
@@ -957,38 +982,6 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 		} else {
 			std::cout << "[Warning - Monsters::loadMonster] Missing targetchange chance. " << file << std::endl;
 		}
-	}
-	
-	if ((node = monsterNode.child("targetstrategy"))) {
-		if ((attr = node.attribute("nearest"))) {
-			mType->info.strategyNearestEnemy = pugi::cast<uint32_t>(attr.value());
-		} else {
-			std::cout << "[Warning - Monsters::loadMonster] Missing nearest enemy chance. " << file << std::endl;
-		}
-
-		if ((attr = node.attribute("weakest"))) {
-			mType->info.strategyWeakestEnemy = pugi::cast<uint32_t>(attr.value());
-		} else {
-			std::cout << "[Warning - Monsters::loadMonster] Missing weakest enemy chance. " << file << std::endl;
-		}
-
-		if ((attr = node.attribute("mostdamage"))) {
-			mType->info.strategyMostDamageEnemy = pugi::cast<uint32_t>(attr.value());
-		} else {
-			std::cout << "[Warning - Monsters::loadMonster] Missing most damage enemy chance. " << file << std::endl;
-		}
-
-		if ((attr = node.attribute("random"))) {
-			mType->info.strategyRandomEnemy = pugi::cast<uint32_t>(attr.value());
-		} else {
-			std::cout << "[Warning - Monsters::loadMonster] Missing random enemy chance. " << file << std::endl;
-		}
-
-		if (mType->info.strategyNearestEnemy + mType->info.strategyWeakestEnemy + mType->info.strategyMostDamageEnemy + mType->info.strategyRandomEnemy != 100) {
-			std::cout << "[Warning - Monsters::loadMonster] Target strategy weights does not equal 100 " << file << std::endl;
-		}
-	} else {
-		std::cout << "[Warning - Monsters::loadMonster] Missing target change strategies. " << file << std::endl;
 	}
 
 	if ((node = monsterNode.child("look"))) {
@@ -1010,10 +1003,18 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 			if ((attr = node.attribute("feet"))) {
 				mType->info.outfit.lookFeet = pugi::cast<uint16_t>(attr.value());
 			}
+
+			if ((attr = node.attribute("addons"))) {
+				mType->info.outfit.lookAddons = pugi::cast<uint16_t>(attr.value());
+			}
 		} else if ((attr = node.attribute("typeex"))) {
 			mType->info.outfit.lookTypeEx = pugi::cast<uint16_t>(attr.value());
 		} else {
 			std::cout << "[Warning - Monsters::loadMonster] Missing look type/typeex. " << file << std::endl;
+		}
+
+		if ((attr = node.attribute("mount"))) {
+			mType->info.outfit.lookMount = pugi::cast<uint16_t>(attr.value());
 		}
 
 		if ((attr = node.attribute("corpse"))) {
@@ -1024,7 +1025,7 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 	if ((node = monsterNode.child("attacks"))) {
 		for (auto attackNode : node.children()) {
 			spellBlock_t sb;
-			if (deserializeSpell(mType, attackNode, sb, monsterName)) {
+			if (deserializeSpell(attackNode, sb, monsterName)) {
 				mType->info.attackSpells.emplace_back(std::move(sb));
 			} else {
 				std::cout << "[Warning - Monsters::loadMonster] Cant load spell. " << file << std::endl;
@@ -1043,7 +1044,7 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 
 		for (auto defenseNode : node.children()) {
 			spellBlock_t sb;
-			if (deserializeSpell(mType, defenseNode, sb, monsterName)) {
+			if (deserializeSpell(defenseNode, sb, monsterName)) {
 				mType->info.defenseSpells.emplace_back(std::move(sb));
 			} else {
 				std::cout << "[Warning - Monsters::loadMonster] Cant load spell. " << file << std::endl;
@@ -1068,6 +1069,18 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 							tmpStrValue == "earth") {
 					mType->info.damageImmunities |= COMBAT_EARTHDAMAGE;
 					mType->info.conditionImmunities |= CONDITION_POISON;
+				} else if (tmpStrValue == "drown") {
+					mType->info.damageImmunities |= COMBAT_DROWNDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_DROWN;
+				} else if (tmpStrValue == "ice") {
+					mType->info.damageImmunities |= COMBAT_ICEDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_FREEZING;
+				} else if (tmpStrValue == "holy") {
+					mType->info.damageImmunities |= COMBAT_HOLYDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_DAZZLED;
+				} else if (tmpStrValue == "death") {
+					mType->info.damageImmunities |= COMBAT_DEATHDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_CURSED;
 				} else if (tmpStrValue == "lifedrain") {
 					mType->info.damageImmunities |= COMBAT_LIFEDRAIN;
 				} else if (tmpStrValue == "manadrain") {
@@ -1105,6 +1118,26 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 					mType->info.damageImmunities |= COMBAT_EARTHDAMAGE;
 					mType->info.conditionImmunities |= CONDITION_POISON;
 				}
+			} else if ((attr = immunityNode.attribute("drown"))) {
+				if (attr.as_bool()) {
+					mType->info.damageImmunities |= COMBAT_DROWNDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_DROWN;
+				}
+			} else if ((attr = immunityNode.attribute("ice"))) {
+				if (attr.as_bool()) {
+					mType->info.damageImmunities |= COMBAT_ICEDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_FREEZING;
+				}
+			} else if ((attr = immunityNode.attribute("holy"))) {
+				if (attr.as_bool()) {
+					mType->info.damageImmunities |= COMBAT_HOLYDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_DAZZLED;
+				}
+			} else if ((attr = immunityNode.attribute("death"))) {
+				if (attr.as_bool()) {
+					mType->info.damageImmunities |= COMBAT_DEATHDAMAGE;
+					mType->info.conditionImmunities |= CONDITION_CURSED;
+				}
 			} else if ((attr = immunityNode.attribute("lifedrain"))) {
 				if (attr.as_bool()) {
 					mType->info.damageImmunities |= COMBAT_LIFEDRAIN;
@@ -1140,7 +1173,7 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 	}
 
 	if ((node = monsterNode.child("voices"))) {
-		/*if ((attr = node.attribute("speed")) || (attr = node.attribute("interval"))) {
+		if ((attr = node.attribute("speed")) || (attr = node.attribute("interval"))) {
 			mType->info.yellSpeedTicks = pugi::cast<uint32_t>(attr.value());
 		} else {
 			std::cout << "[Warning - Monsters::loadMonster] Missing voices speed. " << file << std::endl;
@@ -1155,7 +1188,7 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 			mType->info.yellChance = chance;
 		} else {
 			std::cout << "[Warning - Monsters::loadMonster] Missing voices chance. " << file << std::endl;
-		}*/
+		}
 
 		for (auto voiceNode : node.children()) {
 			voiceBlock_t vb;
@@ -1192,6 +1225,11 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 				if (mType->info.damageImmunities & COMBAT_PHYSICALDAMAGE) {
 					std::cout << "[Warning - Monsters::loadMonster] Same element \"physical\" on immunity and element tags. " << file << std::endl;
 				}
+			} else if ((attr = elementNode.attribute("icePercent"))) {
+				mType->info.elementMap[COMBAT_ICEDAMAGE] = pugi::cast<int32_t>(attr.value());
+				if (mType->info.damageImmunities & COMBAT_ICEDAMAGE) {
+					std::cout << "[Warning - Monsters::loadMonster] Same element \"ice\" on immunity and element tags. " << file << std::endl;
+				}
 			} else if ((attr = elementNode.attribute("poisonPercent")) || (attr = elementNode.attribute("earthPercent"))) {
 				mType->info.elementMap[COMBAT_EARTHDAMAGE] = pugi::cast<int32_t>(attr.value());
 				if (mType->info.damageImmunities & COMBAT_EARTHDAMAGE) {
@@ -1206,6 +1244,21 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 				mType->info.elementMap[COMBAT_ENERGYDAMAGE] = pugi::cast<int32_t>(attr.value());
 				if (mType->info.damageImmunities & COMBAT_ENERGYDAMAGE) {
 					std::cout << "[Warning - Monsters::loadMonster] Same element \"energy\" on immunity and element tags. " << file << std::endl;
+				}
+			} else if ((attr = elementNode.attribute("holyPercent"))) {
+				mType->info.elementMap[COMBAT_HOLYDAMAGE] = pugi::cast<int32_t>(attr.value());
+				if (mType->info.damageImmunities & COMBAT_HOLYDAMAGE) {
+					std::cout << "[Warning - Monsters::loadMonster] Same element \"holy\" on immunity and element tags. " << file << std::endl;
+				}
+			} else if ((attr = elementNode.attribute("deathPercent"))) {
+				mType->info.elementMap[COMBAT_DEATHDAMAGE] = pugi::cast<int32_t>(attr.value());
+				if (mType->info.damageImmunities & COMBAT_DEATHDAMAGE) {
+					std::cout << "[Warning - Monsters::loadMonster] Same element \"death\" on immunity and element tags. " << file << std::endl;
+				}
+			} else if ((attr = elementNode.attribute("drownPercent"))) {
+				mType->info.elementMap[COMBAT_DROWNDAMAGE] = pugi::cast<int32_t>(attr.value());
+				if (mType->info.damageImmunities & COMBAT_DROWNDAMAGE) {
+					std::cout << "[Warning - Monsters::loadMonster] Same element \"drown\" on immunity and element tags. " << file << std::endl;
 				}
 			} else if ((attr = elementNode.attribute("lifedrainPercent"))) {
 				mType->info.elementMap[COMBAT_LIFEDRAIN] = pugi::cast<int32_t>(attr.value());
@@ -1232,7 +1285,6 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 
 		for (auto summonNode : node.children()) {
 			int32_t chance = 100;
-			int32_t delay = 1;
 			int32_t speed = 1000;
 			int32_t max = mType->info.maxSummons;
 			bool force = false;
@@ -1246,12 +1298,6 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 				if (chance > 100) {
 					chance = 100;
 					std::cout << "[Warning - Monsters::loadMonster] Summon chance value out of bounds. " << file << std::endl;
-				}
-			} else if ((attr = summonNode.attribute("delay"))) {
-				delay = pugi::cast<int32_t>(attr.value());
-				if (delay > 100) {
-					delay = 100;
-					std::cout << "[Warning - Monsters::loadMonster] Summon delay value out of bounds. " << file << std::endl;
 				}
 			}
 
@@ -1268,7 +1314,6 @@ MonsterType* Monsters::loadMonster(const std::string& file, const std::string& m
 				sb.name = attr.as_string();
 				sb.speed = speed;
 				sb.chance = chance;
-				sb.delay = delay;
 				sb.max = max;
 				sb.force = force;
 				mType->info.summons.emplace_back(sb);
@@ -1359,6 +1404,10 @@ bool Monsters::loadLootItem(const pugi::xml_node& node, LootBlock& lootBlock)
 
 	if ((attr = node.attribute("countmax"))) {
 		int32_t lootCountMax = pugi::cast<int32_t>(attr.value());
+		if (lootCountMax > 100) {
+			std::cout << "[Warning - Monsters::loadMonster] Invalid \"countmax\" "<< lootCountMax <<" used for loot, the max allowed value is 100. " << std::endl;
+			return false;
+		}
 		lootBlock.countmax = std::max<int32_t>(1, lootCountMax);
 	} else {
 		lootBlock.countmax = 1;

@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -12,17 +28,42 @@ extern Game g_game;
 Container::Container(uint16_t type) :
 	Container(type, items[type].maxItems) {}
 
-Container::Container(uint16_t type, uint16_t size) :
+Container::Container(uint16_t type, uint16_t size, bool unlocked /*= true*/, bool pagination /*= false*/) :
 	Item(type),
-	maxSize(size)
+	maxSize(size),
+	unlocked(unlocked),
+	pagination(pagination)
 {}
+
+Container::Container(Tile* tile) : Container(ITEM_BROWSEFIELD, 30, false, true)
+{
+	TileItemVector* itemVector = tile->getItemList();
+	if (itemVector) {
+		for (Item* item : *itemVector) {
+			if ((item->getContainer() || item->hasProperty(CONST_PROP_MOVEABLE)) && !item->hasAttribute(ITEM_ATTRIBUTE_UNIQUEID)) {
+				itemlist.push_front(item);
+				item->setParent(this);
+			}
+		}
+	}
+
+	setParent(tile);
+}
 
 Container::~Container()
 {
-	for (Item* item : itemlist) {
-		item->setParent(nullptr);
-		item->decrementReferenceCounter();
-	}
+	/*if (getID() == ITEM_BROWSEFIELD) {
+		g_game.browseFields.erase(getTile());
+
+		for (Item* item : itemlist) {
+			item->setParent(parent);
+		}
+	} else {*/
+		for (Item* item : itemlist) {
+			item->setParent(nullptr);
+			item->decrementReferenceCounter();
+		}
+	//}
 }
 
 Item* Container::clone() const
@@ -51,11 +92,8 @@ std::string Container::getName(bool addArticle /* = false*/) const {
 
 bool Container::hasParent() const
 {
-	Thing* thing = getParent();
-	if (!thing) {
-		return false;
-	}
-	return thing->getContainer() != nullptr;
+	//return getID() != ITEM_BROWSEFIELD && dynamic_cast<const Player*>(getParent()) == nullptr;
+	return dynamic_cast<const Player*>(getParent()) == nullptr;
 }
 
 void Container::addItem(Item* item)
@@ -72,7 +110,6 @@ Attr_ReadValue Container::readAttr(AttrTypes_t attr, PropStream& propStream)
 		}
 		return ATTR_READ_END;
 	}
-
 	return Item::readAttr(attr, propStream);
 }
 
@@ -185,7 +222,7 @@ bool Container::isHoldingItem(const Item* item) const
 void Container::onAddContainerItem(Item* item)
 {
 	SpectatorVec spectators;
-	g_game.map.getSpectators(spectators, getPosition(), false, true, 2, 2, 2, 2);
+	g_game.map.getSpectators(spectators, getPosition(), false, true, 1, 1, 1, 1);
 
 	//send to client
 	for (Creature* spectator : spectators) {
@@ -201,7 +238,7 @@ void Container::onAddContainerItem(Item* item)
 void Container::onUpdateContainerItem(uint32_t index, Item* oldItem, Item* newItem)
 {
 	SpectatorVec spectators;
-	g_game.map.getSpectators(spectators, getPosition(), false, true, 2, 2, 2, 2);
+	g_game.map.getSpectators(spectators, getPosition(), false, true, 1, 1, 1, 1);
 
 	//send to client
 	for (Creature* spectator : spectators) {
@@ -217,7 +254,7 @@ void Container::onUpdateContainerItem(uint32_t index, Item* oldItem, Item* newIt
 void Container::onRemoveContainerItem(uint32_t index, Item* item)
 {
 	SpectatorVec spectators;
-	g_game.map.getSpectators(spectators, getPosition(), false, true, 2, 2, 2, 2);
+	g_game.map.getSpectators(spectators, getPosition(), false, true, 1, 1, 1, 1);
 
 	//send change to client
 	for (Creature* spectator : spectators) {
@@ -240,6 +277,10 @@ ReturnValue Container::queryAdd(int32_t index, const Thing& thing, uint32_t coun
 		return RETURNVALUE_NOERROR;
 	}
 
+	if (!unlocked) {
+		return RETURNVALUE_NOTPOSSIBLE;
+	}
+
 	const Item* item = thing.getItem();
 	if (item == nullptr) {
 		return RETURNVALUE_NOTPOSSIBLE;
@@ -253,12 +294,30 @@ ReturnValue Container::queryAdd(int32_t index, const Thing& thing, uint32_t coun
 		return RETURNVALUE_THISISIMPOSSIBLE;
 	}
 
+	// store items can be only moved into depot chest or store inbox
+	if (item->isStoreItem() && !dynamic_cast<const DepotChest*>(this)) {
+		return RETURNVALUE_ITEMCANNOTBEMOVEDTHERE;
+	}
+
 	const Cylinder* cylinder = getParent();
+
+	// don't allow moving items into container that is store item and is in store inbox
+	if (isStoreItem() && dynamic_cast<const StoreInbox*>(cylinder)) {
+		ReturnValue ret = RETURNVALUE_ITEMCANNOTBEMOVEDTHERE;
+		if (!item->isStoreItem()) {
+			ret = RETURNVALUE_CANNOTMOVEITEMISNOTSTOREITEM;
+		}
+		return ret;
+	}
 
 	if (!hasBitSet(FLAG_NOLIMIT, flags)) {
 		while (cylinder) {
 			if (cylinder == &thing) {
 				return RETURNVALUE_THISISIMPOSSIBLE;
+			}
+
+			if (dynamic_cast<const Inbox*>(cylinder)) {
+				return RETURNVALUE_CONTAINERNOTENOUGHROOM;
 			}
 
 			cylinder = cylinder->getParent();
@@ -277,20 +336,11 @@ ReturnValue Container::queryAdd(int32_t index, const Thing& thing, uint32_t coun
 		}
 	}
 
-	const Cylinder* const topParent = getTopParent();
-	if (actor && g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_MOVE_HOUSE_ITEMS)) {
-		if (const HouseTile* const houseTile = dynamic_cast<const HouseTile*>(topParent->getTile())) {
-			if (!topParent->getCreature() && !houseTile->getHouse()->isInvited(actor->getPlayer())) {
-				return RETURNVALUE_PLAYERISNOTINVITED;
-			}
-		}
-	}
-
+	const Cylinder* topParent = getTopParent();
 	if (topParent != this) {
 		return topParent->queryAdd(INDEX_WHEREEVER, *item, count, flags | FLAG_CHILDISOWNER, actor);
-	} else {
-		return RETURNVALUE_NOERROR;
 	}
+	return RETURNVALUE_NOERROR;
 }
 
 ReturnValue Container::queryMaxCount(int32_t index, const Thing& thing, uint32_t count,
@@ -364,13 +414,9 @@ ReturnValue Container::queryRemove(const Thing& thing, uint32_t count, uint32_t 
 		return RETURNVALUE_NOTMOVEABLE;
 	}
 
-	if (actor && g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_MOVE_HOUSE_ITEMS)) {
-		const Cylinder* const topParent = getTopParent();
-		if (const HouseTile* const houseTile = dynamic_cast<const HouseTile*>(topParent->getTile())) {
-			if (!topParent->getCreature() && !houseTile->getHouse()->isInvited(actor->getPlayer())) {
-				return RETURNVALUE_PLAYERISNOTINVITED;
-			}
-		}
+	const HouseTile* houseTile = dynamic_cast<const HouseTile*>(getTopParent());
+	if (houseTile) {
+		return houseTile->queryRemove(thing, count, flags, actor);
 	}
 
 	return RETURNVALUE_NOERROR;
@@ -379,6 +425,11 @@ ReturnValue Container::queryRemove(const Thing& thing, uint32_t count, uint32_t 
 Cylinder* Container::queryDestination(int32_t& index, const Thing& thing, Item** destItem,
 		uint32_t& flags)
 {
+	if (!unlocked) {
+		*destItem = nullptr;
+		return this;
+	}
+
 	if (index == 254 /*move up*/) {
 		index = INDEX_WHEREEVER;
 		*destItem = nullptr;
@@ -424,11 +475,7 @@ Cylinder* Container::queryDestination(int32_t& index, const Thing& thing, Item**
 		}
 	}
 
-	bool autoStack = g_config.getBoolean(ConfigManager::PLAYER_INVENTORY_AUTOSTACK);
-	if (hasBitSet(FLAG_IGNOREAUTOSTACK, flags)) {
-		autoStack = false;
-	}
-
+	bool autoStack = !hasBitSet(FLAG_IGNOREAUTOSTACK, flags);
 	if (autoStack && item->isStackable() && item->getParent() != this) {
 		if (*destItem && (*destItem)->equals(item) && (*destItem)->getItemCount() < 100) {
 			return this;
@@ -631,7 +678,7 @@ Thing* Container::getThing(size_t index) const
 void Container::postAddNotification(Thing* thing, const Cylinder* oldParent, int32_t index, cylinderlink_t)
 {
 	Cylinder* topParent = getTopParent();
-	if (topParent->getCreature()) {
+	if (topParent->getCreature() || dynamic_cast<DepotLocker*>(topParent)) {
 		topParent->postAddNotification(thing, oldParent, index, LINK_TOPPARENT);
 	} else if (topParent == this) {
 		//let the tile class notify surrounding players
@@ -646,7 +693,7 @@ void Container::postAddNotification(Thing* thing, const Cylinder* oldParent, int
 void Container::postRemoveNotification(Thing* thing, const Cylinder* newParent, int32_t index, cylinderlink_t)
 {
 	Cylinder* topParent = getTopParent();
-	if (topParent->getCreature()) {
+	if (topParent->getCreature() || dynamic_cast<DepotLocker*>(topParent)) {
 		topParent->postRemoveNotification(thing, newParent, index, LINK_TOPPARENT);
 	} else if (topParent == this) {
 		//let the tile class notify surrounding players
@@ -677,13 +724,6 @@ void Container::internalAddThing(uint32_t, Thing* thing)
 
 void Container::startDecaying()
 {
-	if (getActionId() >= 1000 && getActionId() <= 2000) {
-		// Quest items should never decay
-		return;
-	}
-
-	g_game.startDecay(this);
-	
 	for (Item* item : itemlist) {
 		item->startDecaying();
 	}

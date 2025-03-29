@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -397,53 +413,6 @@ MoveEvent* MoveEvents::getEvent(Item* item, MoveEvent_t eventType)
 	return nullptr;
 }
 
-MoveEvent* MoveEvents::getUniqueIdEvent(Item* item, MoveEvent_t eventType)
-{
-	MoveListMap::iterator it;
-
-	if (item->hasAttribute(ITEM_ATTRIBUTE_UNIQUEID)) {
-		it = uniqueIdMap.find(item->getUniqueId());
-		if (it != uniqueIdMap.end()) {
-			std::list<MoveEvent>& moveEventList = it->second.moveEvent[eventType];
-			if (!moveEventList.empty()) {
-				return &(*moveEventList.begin());
-			}
-		}
-	}
-
-	return nullptr;
-}
-
-MoveEvent* MoveEvents::getActionIdEvent(Item* item, MoveEvent_t eventType)
-{
-	MoveListMap::iterator it;
-
-	if (item->hasAttribute(ITEM_ATTRIBUTE_ACTIONID)) {
-		it = actionIdMap.find(item->getActionId());
-		if (it != actionIdMap.end()) {
-			std::list<MoveEvent>& moveEventList = it->second.moveEvent[eventType];
-			if (!moveEventList.empty()) {
-				return &(*moveEventList.begin());
-			}
-		}
-	}
-
-	return nullptr;
-}
-
-MoveEvent* MoveEvents::getItemIdEvent(Item* item, MoveEvent_t eventType)
-{
-	MoveListMap::iterator it = itemIdMap.find(item->getID());
-	if (it != itemIdMap.end()) {
-		std::list<MoveEvent>& moveEventList = it->second.moveEvent[eventType];
-		if (!moveEventList.empty()) {
-			return &(*moveEventList.begin());
-		}
-	}
-
-	return nullptr;
-}
-
 void MoveEvents::addEvent(MoveEvent moveEvent, const Position& pos, MovePosListMap& map)
 {
 	auto it = map.find(pos);
@@ -495,17 +464,7 @@ uint32_t MoveEvents::onCreatureMove(Creature* creature, const Tile* tile, MoveEv
 			continue;
 		}
 
-		moveEvent = getUniqueIdEvent(tileItem, eventType);
-		if (moveEvent) {
-			ret &= moveEvent->fireStepEvent(creature, tileItem, pos);
-		}
-
-		moveEvent = getActionIdEvent(tileItem, eventType);
-		if (moveEvent) {
-			ret &= moveEvent->fireStepEvent(creature, tileItem, pos);
-		}
-
-		moveEvent = getItemIdEvent(tileItem, eventType);
+		moveEvent = getEvent(tileItem, eventType);
 		if (moveEvent) {
 			ret &= moveEvent->fireStepEvent(creature, tileItem, pos);
 		}
@@ -994,9 +953,8 @@ uint32_t MoveEvent::fireStepEvent(Creature* creature, Item* item, const Position
 {
 	if (scripted) {
 		return executeStep(creature, item, pos);
-	} else {
-		return stepFunction(creature, item, pos);
 	}
+	return stepFunction(creature, item, pos);
 }
 
 bool MoveEvent::executeStep(Creature* creature, Item* item, const Position& pos)
@@ -1033,9 +991,8 @@ ReturnValue MoveEvent::fireEquip(Player* player, Item* item, slots_t slot, bool 
 			return RETURNVALUE_CANNOTBEDRESSED;
 		}
 		return equipFunction(this, player, item, slot, isCheck);
-	} else {
-		return equipFunction(this, player, item, slot, isCheck);
 	}
+	return equipFunction(this, player, item, slot, isCheck);
 }
 
 bool MoveEvent::executeEquip(Player* player, Item* item, slots_t slot, bool isCheck)
@@ -1066,9 +1023,8 @@ uint32_t MoveEvent::fireAddRemItem(Item* item, Item* tileItem, const Position& p
 {
 	if (scripted) {
 		return executeAddRemItem(item, tileItem, pos);
-	} else {
-		return moveFunction(item, tileItem, pos);
 	}
+	return moveFunction(item, tileItem, pos);
 }
 
 bool MoveEvent::executeAddRemItem(Item* item, Item* tileItem, const Position& pos)

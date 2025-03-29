@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -11,8 +27,6 @@
 #include "configmanager.h"
 #include "scheduler.h"
 #include "monster.h"
-#include "database.h"
-#include "databasetasks.h"
 
 #include <fmt/format.h>
 
@@ -46,9 +60,7 @@ bool Raids::loadFromXml()
 
 	for (auto raidNode : doc.child("raids").children()) {
 		std::string name, file;
-		uint32_t interval = 0;
-		time_t date = 0;
-		bool log = false;
+		uint32_t interval, margin;
 
 		pugi::xml_attribute attr;
 		if ((attr = raidNode.attribute("name"))) {
@@ -65,24 +77,27 @@ bool Raids::loadFromXml()
 			std::cout << "[Warning - Raids::loadFromXml] File tag missing for raid " << name << ". Using default: " << file << std::endl;
 		}
 
-		if ((attr = raidNode.attribute("log"))) {
-			log = attr.as_bool();
-		}
-
-		if ((attr = raidNode.attribute("date"))) {
-			date = pugi::cast<time_t>(attr.value());
-		} else if ((attr = raidNode.attribute("interval"))) {
-			interval = pugi::cast<uint32_t>(attr.value());
-		}
-
-		if (interval == 0 && date == 0) {
-			std::cout << "[Warning - Raids::loadFromXml] No date or interval set for raid " << name << "." << std::endl;
+		interval = pugi::cast<uint32_t>(raidNode.attribute("interval2").value()) * 60;
+		if (interval == 0) {
+			std::cout << "[Error - Raids::loadFromXml] interval2 tag missing or zero (would divide by 0) for raid: " << name << std::endl;
 			continue;
 		}
 
-		Raid* newRaid = new Raid(name, interval);
-		newRaid->setDateTime(date);
-		newRaid->setLogged(log);
+		if ((attr = raidNode.attribute("margin"))) {
+			margin = pugi::cast<uint32_t>(attr.value()) * 60 * 1000;
+		} else {
+			std::cout << "[Warning - Raids::loadFromXml] margin tag missing for raid: " << name << std::endl;
+			margin = 0;
+		}
+
+		bool repeat;
+		if ((attr = raidNode.attribute("repeat"))) {
+			repeat = booleanString(attr.as_string());
+		} else {
+			repeat = false;
+		}
+
+		Raid* newRaid = new Raid(name, interval, margin, repeat);
 		if (newRaid->loadFromXml("data/raids/" + file)) {
 			raidList.push_back(newRaid);
 		} else {
@@ -91,44 +106,11 @@ bool Raids::loadFromXml()
 		}
 	}
 
-	time_t prevRaidDate = 0;
-	for (auto it = raidList.begin(), end = raidList.end(); it != end; ++it) {
-		Raid* raid = *it;
-
-		Database& db = Database::getInstance();
-		if (auto queryResult = db.storeQuery(fmt::format("SELECT `date` FROM `raids` WHERE `name` = {:s}", db.escapeString(raid->getName())))) {
-			raid->setDateTime(queryResult->getNumber<time_t>("date"));
-			if (raid->isLogged()) {
-				std::cout << ">> [Raids] " << raid->getName() << " scheduled to happen somewhere around "
-				          << formatDate(raid->getDateTime()) << std::endl;
-			}
-		} else {
-			if (raid->getInterval() != 0) {
-				// Execute the raid within 1 to 20 hours in 
-				time_t executionDate =
-				    std::time(nullptr) + raid->getInterval() + uniform_random(1 * 60 * 60, 20 * 60 * 60);
-				raid->setDateTime(executionDate);
-			}
-
-			time_t currentDateTime = raid->getDateTime();
-			if (prevRaidDate != 0 && raid->getDateTime() - prevRaidDate <= std::time(nullptr) + 24 * 60 * 60) {
-				raid->setDateTime(raid->getDateTime() +
-				                  uniform_random(3 * 24 * 60 * 60, 30 * 24 * 60 * 60));
-			}
-
-			prevRaidDate = currentDateTime;
-			if (raid->isLogged()) {
-				std::cout << ">> [Raids] " << raid->getName() << " scheduled to happen somewhere around "
-				          << formatDate(raid->getDateTime()) << std::endl;
-			}
-			g_databaseTasks.addTask(fmt::format("INSERT INTO `raids`(`date`, `name`) VALUES ({:d}, {:s})",
-			                                    raid->getDateTime(), db.escapeString(raid->getName())));
-		}
-	}
-
 	loaded = true;
 	return true;
 }
+
+static constexpr int32_t MAX_RAND_RANGE = 10000000;
 
 bool Raids::startup()
 {
@@ -136,7 +118,9 @@ bool Raids::startup()
 		return false;
 	}
 
-	checkRaidsEvent = g_scheduler.addEvent(createSchedulerTask(CHECK_RAIDS_INTERVAL, std::bind(&Raids::checkRaids, this)));
+	setLastRaidEnd(OTSYS_TIME());
+
+	checkRaidsEvent = g_scheduler.addEvent(createSchedulerTask(CHECK_RAIDS_INTERVAL * 1000, std::bind(&Raids::checkRaids, this)));
 
 	started = true;
 	return started;
@@ -145,33 +129,25 @@ bool Raids::startup()
 void Raids::checkRaids()
 {
 	if (!getRunning()) {
+		uint64_t now = OTSYS_TIME();
+
 		for (auto it = raidList.begin(), end = raidList.end(); it != end; ++it) {
 			Raid* raid = *it;
-			if (!raid->hasExecuted() && std::time(nullptr) >= raid->getDateTime()) {
-				// Update the raid next execution date
-				if (raid->getInterval() != 0) {
-					raid->setDateTime(std::time(nullptr) + raid->getInterval() +
-					                  normal_random(1 * 60 * 60, 20 * 60 * 60));
+			if (now >= (getLastRaidEnd() + raid->getMargin())) {
+				if (((MAX_RAND_RANGE * CHECK_RAIDS_INTERVAL) / raid->getInterval()) >= static_cast<uint32_t>(uniform_random(0, MAX_RAND_RANGE))) {
+					setRunning(raid);
+					raid->startRaid();
 
-					if (raid->isLogged()) {
-						std::cout << ">> [Raids] " << raid->getName() << " re-scheduled to happen somewhere around "
-						          << formatDate(raid->getDateTime()) << std::endl;
+					if (!raid->canBeRepeated()) {
+						raidList.erase(it);
 					}
+					break;
 				}
-
-				Database& db = Database::getInstance();
-				g_databaseTasks.addTask(
-				    fmt::format("UPDATE `raids` SET `date` = {:d}, `count` = `count` + 1 WHERE `name` = {:s}", raid->getDateTime(), db.escapeString(raid->getName())));
-
-				setRunning(raid);
-				raid->startRaid();
-				raid->setExecuted();
-				break;
 			}
 		}
 	}
 
-	checkRaidsEvent = g_scheduler.addEvent(createSchedulerTask(CHECK_RAIDS_INTERVAL, std::bind(&Raids::checkRaids, this)));
+	checkRaidsEvent = g_scheduler.addEvent(createSchedulerTask(CHECK_RAIDS_INTERVAL * 1000, std::bind(&Raids::checkRaids, this)));
 }
 
 void Raids::clear()
@@ -188,6 +164,7 @@ void Raids::clear()
 	loaded = false;
 	started = false;
 	running = nullptr;
+	lastRaidEnd = 0;
 
 	scriptInterface.reInitState();
 }
@@ -263,6 +240,7 @@ void Raid::startRaid()
 {
 	RaidEvent* raidEvent = getNextRaidEvent();
 	if (raidEvent) {
+		state = RAIDSTATE_EXECUTING;
 		nextEventEvent = g_scheduler.addEvent(createSchedulerTask(raidEvent->getDelay(), std::bind(&Raid::executeRaidEvent, this, raidEvent)));
 	}
 }
@@ -274,7 +252,7 @@ void Raid::executeRaidEvent(RaidEvent* raidEvent)
 		RaidEvent* newRaidEvent = getNextRaidEvent();
 
 		if (newRaidEvent) {
-			uint32_t ticks = static_cast<uint32_t>(std::max<int32_t>(1000, newRaidEvent->getDelay() - raidEvent->getDelay()));
+			uint32_t ticks = static_cast<uint32_t>(std::max<int32_t>(RAID_MINTICKS, newRaidEvent->getDelay() - raidEvent->getDelay()));
 			nextEventEvent = g_scheduler.addEvent(createSchedulerTask(ticks, std::bind(&Raid::executeRaidEvent, this, newRaidEvent)));
 		} else {
 			resetRaid();
@@ -287,7 +265,9 @@ void Raid::executeRaidEvent(RaidEvent* raidEvent)
 void Raid::resetRaid()
 {
 	nextEvent = 0;
+	state = RAIDSTATE_IDLE;
 	g_game.raids.setRunning(nullptr);
+	g_game.raids.setLastRaidEnd(OTSYS_TIME());
 }
 
 void Raid::stopEvents()
@@ -302,9 +282,8 @@ RaidEvent* Raid::getNextRaidEvent()
 {
 	if (nextEvent < raidEvents.size()) {
 		return raidEvents[nextEvent];
-	} else {
-		return nullptr;
 	}
+	return nullptr;
 }
 
 bool RaidEvent::configureRaidEvent(const pugi::xml_node& eventNode)
@@ -315,7 +294,7 @@ bool RaidEvent::configureRaidEvent(const pugi::xml_node& eventNode)
 		return false;
 	}
 
-	delay = std::max<uint32_t>(1000, pugi::cast<uint32_t>(delayAttribute.value()));
+	delay = std::max<uint32_t>(RAID_MINTICKS, pugi::cast<uint32_t>(delayAttribute.value()));
 	return true;
 }
 
@@ -399,43 +378,22 @@ bool SingleSpawnEvent::configureRaidEvent(const pugi::xml_node& eventNode)
 		std::cout << "[Error] Raid: z tag missing for singlespawn event." << std::endl;
 		return false;
 	}
-
-	for (auto lootNode : eventNode.children()) {
-		LootBlock loot;
-
-		if ((attr = lootNode.attribute("item"))) {
-			loot.id = pugi::cast<uint16_t>(attr.value());
-		}
-
-		if ((attr = lootNode.attribute("countmax"))) {
-			loot.countmax = pugi::cast<uint32_t>(attr.value());
-		}
-
-		if ((attr = lootNode.attribute("chance"))) {
-			loot.chance = pugi::cast<uint32_t>(attr.value());
-		}
-
-		extraLoot.push_back(std::move(loot));
-	}
-
 	return true;
 }
 
 bool SingleSpawnEvent::executeEvent()
 {
-	Monster* monster = Monster::createMonster(monsterName, &extraLoot);
+	Monster* monster = Monster::createMonster(monsterName);
 	if (!monster) {
 		std::cout << "[Error] Raids: Cant create monster " << monsterName << std::endl;
 		return false;
 	}
 
-	if (!g_game.placeCreature(monster, position, true)) {
+	if (!g_game.placeCreature(monster, position, false, true)) {
 		delete monster;
 		std::cout << "[Error] Raids: Cant place monster " << monsterName << std::endl;
 		return false;
 	}
-
-	g_game.addMagicEffect(monster->getPosition(), CONST_ME_TELEPORT);
 	return true;
 }
 
@@ -546,20 +504,6 @@ bool AreaSpawnEvent::configureRaidEvent(const pugi::xml_node& eventNode)
 			maxAmount = 0;
 		}
 
-		uint32_t spread;
-		if ((attr = monsterNode.attribute("spread"))) {
-			spread = pugi::cast<uint32_t>(attr.value());
-		} else {
-			spread = 0;
-		}
-
-		uint64_t lifetime;
-		if ((attr = monsterNode.attribute("lifetime"))) {
-			lifetime = pugi::cast<uint64_t>(attr.value());
-		} else {
-			lifetime = 0;
-		}
-
 		if (maxAmount == 0 && minAmount == 0) {
 			if ((attr = monsterNode.attribute("amount"))) {
 				minAmount = pugi::cast<uint32_t>(attr.value());
@@ -570,28 +514,7 @@ bool AreaSpawnEvent::configureRaidEvent(const pugi::xml_node& eventNode)
 			}
 		}
 
-		spawnList.emplace_back(name, minAmount, maxAmount, spread, lifetime);
-
-		auto& backSpawn = spawnList.back();
-
-		for (auto lootNode : monsterNode.children()) {
-			LootBlock loot;
-
-			if ((attr = lootNode.attribute("item"))) {
-				loot.id = pugi::cast<uint16_t>(attr.value());
-			}
-
-			if ((attr = lootNode.attribute("countmax"))) {
-				loot.countmax = pugi::cast<uint32_t>(attr.value());
-			}
-
-			if ((attr = lootNode.attribute("chance"))) {
-				loot.chance = pugi::cast<uint32_t>(attr.value());
-			}
-
-			backSpawn.extraLoot.push_back(std::move(loot));
-		}
-
+		spawnList.emplace_back(name, minAmount, maxAmount);
 	}
 	return true;
 }
@@ -601,22 +524,17 @@ bool AreaSpawnEvent::executeEvent()
 	for (const MonsterSpawn& spawn : spawnList) {
 		uint32_t amount = uniform_random(spawn.minAmount, spawn.maxAmount);
 		for (uint32_t i = 0; i < amount; ++i) {
-			Monster* monster = Monster::createMonster(spawn.name, &spawn.extraLoot);
+			Monster* monster = Monster::createMonster(spawn.name);
 			if (!monster) {
 				std::cout << "[Error - AreaSpawnEvent::executeEvent] Can't create monster " << spawn.name << std::endl;
 				return false;
 			}
 
-			if (spawn.lifetime > 0) {
-				monster->setLifeTimeExpiration(OTSYS_TIME() + spawn.lifetime);
-			}
-
 			bool success = false;
 			for (int32_t tries = 0; tries < MAXIMUM_TRIES_PER_MONSTER; tries++) {
 				Tile* tile = g_game.map.getTile(uniform_random(fromPos.x, toPos.x), uniform_random(fromPos.y, toPos.y), uniform_random(fromPos.z, toPos.z));
-				if (tile && !tile->isMoveableBlocking() && !tile->hasFlag(TILESTATE_PROTECTIONZONE) && tile->getTopCreature() == nullptr && g_game.placeCreature(monster, tile->getPosition(), true)) {
+				if (tile && !tile->isMoveableBlocking() && !tile->hasFlag(TILESTATE_PROTECTIONZONE) && tile->getTopCreature() == nullptr && g_game.placeCreature(monster, tile->getPosition(), false, true)) {
 					success = true;
-					g_game.addMagicEffect(monster->getPosition(), CONST_ME_TELEPORT);
 					break;
 				}
 			}

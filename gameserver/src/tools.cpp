@@ -1,62 +1,28 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
 #include "tools.h"
 #include "configmanager.h"
 
-#include <boost/algorithm/string.hpp>
-
 extern ConfigManager g_config;
-
-bool isASCII(const std::string& s)
-{
-	return !std::any_of(s.begin(), s.end(), [](char c) {
-		return static_cast<unsigned char>(c) > 127;
-		});
-}
-
-uint8_t getLiquidColor(uint8_t type)
-{
-	uint8_t result = 0;
-	switch (type)
-	{
-		case 1:
-			result = 1;
-			break;
-		case 0:
-			result = 0;
-			break;
-		case 6:
-			result = 4;
-			break;
-		case 3:
-		case 4:
-		case 7:
-			result = 3;
-			break;
-		case 9:
-			result = 6;
-			break;
-		case 2:
-		case 10:
-			result = 7;
-			break;
-		case 5:
-		case 11:
-			result = 2;
-			break;
-		case 8:
-		case 12:
-			result = 5;
-			break;
-		default:
-			result = 0;
-			break;
-	}
-	return result;
-}
 
 void printXMLError(const std::string& where, const std::string& fileName, const pugi::xml_parse_result& result)
 {
@@ -220,6 +186,51 @@ std::string transformToSHA1(const std::string& input)
 	return std::string(hexstring, 40);
 }
 
+std::string generateToken(const std::string& key, uint32_t ticks)
+{
+	// generate message from ticks
+	std::string message(8, 0);
+	for (uint8_t i = 8; --i; ticks >>= 8) {
+		message[i] = static_cast<char>(ticks & 0xFF);
+	}
+
+	// hmac key pad generation
+	std::string iKeyPad(64, 0x36), oKeyPad(64, 0x5C);
+	for (uint8_t i = 0; i < key.length(); ++i) {
+		iKeyPad[i] ^= key[i];
+		oKeyPad[i] ^= key[i];
+	}
+
+	oKeyPad.reserve(84);
+
+	// hmac concat inner pad with message
+	iKeyPad.append(message);
+
+	// hmac first pass
+	message.assign(transformToSHA1(iKeyPad));
+
+	// hmac concat outer pad with message, conversion from hex to int needed
+	for (uint8_t i = 0; i < message.length(); i += 2) {
+		oKeyPad.push_back(static_cast<char>(std::strtoul(message.substr(i, 2).c_str(), nullptr, 16)));
+	}
+
+	// hmac second pass
+	message.assign(transformToSHA1(oKeyPad));
+
+	// calculate hmac offset
+	uint32_t offset = static_cast<uint32_t>(std::strtoul(message.substr(39, 1).c_str(), nullptr, 16) & 0xF);
+
+	// get truncated hash
+	uint32_t truncHash = static_cast<uint32_t>(std::strtoul(message.substr(2 * offset, 8).c_str(), nullptr, 16)) & 0x7FFFFFFF;
+	message.assign(std::to_string(truncHash));
+
+	// return only last AUTHENTICATOR_DIGITS (default 6) digits, also asserts exactly 6 digits
+	uint32_t hashLen = message.length();
+	message.assign(message.substr(hashLen - std::min(hashLen, AUTHENTICATOR_DIGITS)));
+	message.insert(0, AUTHENTICATOR_DIGITS - std::min(hashLen, AUTHENTICATOR_DIGITS), '0');
+	return message;
+}
+
 void replaceString(std::string& str, const std::string& sought, const std::string& replacement)
 {
 	size_t pos = 0;
@@ -290,31 +301,6 @@ std::mt19937& getRandomGenerator()
 	return generator;
 }
 
-int32_t random(int32_t minNumber, int32_t maxNumber)
-{
-	bool negate = minNumber < 0 || maxNumber < 0;
-	if (negate) {
-		minNumber = std::abs(minNumber);
-		maxNumber = std::abs(maxNumber);
-	}
-
-	int32_t result = maxNumber - minNumber + 1;
-	if (result > 0) {
-		result = rand() % result + minNumber;
-		if (negate) {
-			return -result;
-		}
-
-		return result;
-	}
-
-	if (negate) {
-		return -minNumber;
-	}
-
-	return minNumber;
-}
-
 int32_t uniform_random(int32_t minNumber, int32_t maxNumber)
 {
 	static std::uniform_int_distribution<int32_t> uniformRand;
@@ -370,67 +356,6 @@ std::string convertIPToString(uint32_t ip)
 	}
 
 	return buffer;
-}
-
-int32_t countSpaces(const std::string& str)
-{
-	int32_t totalSpaces = 0;
-	for (char c : str) {
-		if (isspace(c)) {
-			totalSpaces++;
-		}
-	}
-	return totalSpaces;
-}
-
-bool compareSpellWords(const std::string& spellWords, std::string givenWords, bool supportParam)
-{
-	StringVector spellVector = explodeString(spellWords, ",");
-
-	for (int32_t i = 0; i < spellVector.size(); i++) {
-		std::string& str = spellVector[i];
-		
-		if (givenWords[0] == ' ' && str[0] != ' ') {
-			givenWords = givenWords.substr(1, givenWords.length());
-		}
-
-		std::string partialWord = givenWords.substr(0, str.length());
-		if (!boost::iequals(partialWord, str)) {
-			return false;
-		}
-
-		givenWords = givenWords.substr(str.length(), givenWords.length());
-	}
-
-	if (givenWords.length() > 0 && !supportParam) {
-		// word has further strings/params
-		return false;
-	}
-
-	return true;
-}
-
-std::string mergeSpellWords(const std::string& words)
-{
-	StringVector str = explodeString(words, ",");
-	std::ostringstream ss;
-	for (std::string& word : str) {
-		ss << word;
-	}
-	return ss.str();
-}
-
-bool BothAreSpaces(char lhs, char rhs) 
-{
-	return (lhs == rhs) && (lhs == ' '); 
-}
-
-std::string removeExtraSpaces(const std::string& str)
-{
-	std::string copy = str;
-	std::string::iterator new_end = std::unique(copy.begin(), copy.end(), BothAreSpaces);
-	copy.erase(new_end, copy.end());
-	return copy;
 }
 
 std::string formatDate(time_t time)
@@ -609,6 +534,62 @@ MagicEffectNames magicEffectNames = {
 	{"purplenote",		CONST_ME_SOUND_PURPLE},
 	{"bluenote",		CONST_ME_SOUND_BLUE},
 	{"whitenote",		CONST_ME_SOUND_WHITE},
+	{"bubbles",		CONST_ME_BUBBLES},
+	{"dice",		CONST_ME_CRAPS},
+	{"giftwraps",		CONST_ME_GIFT_WRAPS},
+	{"yellowfirework",	CONST_ME_FIREWORK_YELLOW},
+	{"redfirework",		CONST_ME_FIREWORK_RED},
+	{"bluefirework",	CONST_ME_FIREWORK_BLUE},
+	{"stun",		CONST_ME_STUN},
+	{"sleep",		CONST_ME_SLEEP},
+	{"watercreature",	CONST_ME_WATERCREATURE},
+	{"groundshaker",	CONST_ME_GROUNDSHAKER},
+	{"hearts",		CONST_ME_HEARTS},
+	{"fireattack",		CONST_ME_FIREATTACK},
+	{"energyarea",		CONST_ME_ENERGYAREA},
+	{"smallclouds",		CONST_ME_SMALLCLOUDS},
+	{"holydamage",		CONST_ME_HOLYDAMAGE},
+	{"bigclouds",		CONST_ME_BIGCLOUDS},
+	{"icearea",		CONST_ME_ICEAREA},
+	{"icetornado",		CONST_ME_ICETORNADO},
+	{"iceattack",		CONST_ME_ICEATTACK},
+	{"stones",		CONST_ME_STONES},
+	{"smallplants",		CONST_ME_SMALLPLANTS},
+	{"carniphila",		CONST_ME_CARNIPHILA},
+	{"purpleenergy",	CONST_ME_PURPLEENERGY},
+	{"yellowenergy",	CONST_ME_YELLOWENERGY},
+	{"holyarea",		CONST_ME_HOLYAREA},
+	{"bigplants",		CONST_ME_BIGPLANTS},
+	{"cake",		CONST_ME_CAKE},
+	{"giantice",		CONST_ME_GIANTICE},
+	{"watersplash",		CONST_ME_WATERSPLASH},
+	{"plantattack",		CONST_ME_PLANTATTACK},
+	{"tutorialarrow",	CONST_ME_TUTORIALARROW},
+	{"tutorialsquare",	CONST_ME_TUTORIALSQUARE},
+	{"mirrorhorizontal",	CONST_ME_MIRRORHORIZONTAL},
+	{"mirrorvertical",	CONST_ME_MIRRORVERTICAL},
+	{"skullhorizontal",	CONST_ME_SKULLHORIZONTAL},
+	{"skullvertical",	CONST_ME_SKULLVERTICAL},
+	{"assassin",		CONST_ME_ASSASSIN},
+	{"stepshorizontal",	CONST_ME_STEPSHORIZONTAL},
+	{"bloodysteps",		CONST_ME_BLOODYSTEPS},
+	{"stepsvertical",	CONST_ME_STEPSVERTICAL},
+	{"yalaharighost",	CONST_ME_YALAHARIGHOST},
+	{"bats",		CONST_ME_BATS},
+	{"smoke",		CONST_ME_SMOKE},
+	{"insects",		CONST_ME_INSECTS},
+	{"dragonhead",		CONST_ME_DRAGONHEAD},
+	{"orcshaman",		CONST_ME_ORCSHAMAN},
+	{"orcshamanfire",	CONST_ME_ORCSHAMAN_FIRE},
+	{"thunder",		CONST_ME_THUNDER},
+	{"ferumbras",		CONST_ME_FERUMBRAS},
+	{"confettihorizontal",	CONST_ME_CONFETTI_HORIZONTAL},
+	{"confettivertical",	CONST_ME_CONFETTI_VERTICAL},
+	{"blacksmoke",		CONST_ME_BLACKSMOKE},
+	{"redsmoke",		CONST_ME_REDSMOKE},
+	{"yellowsmoke",		CONST_ME_YELLOWSMOKE},
+	{"greensmoke",		CONST_ME_GREENSMOKE},
+	{"purplesmoke",		CONST_ME_PURPLESMOKE},
 };
 
 ShootTypeNames shootTypeNames = {
@@ -627,7 +608,41 @@ ShootTypeNames shootTypeNames = {
 	{"snowball",		CONST_ANI_SNOWBALL},
 	{"powerbolt",		CONST_ANI_POWERBOLT},
 	{"poison",		CONST_ANI_POISON},
-	{"earth", 		CONST_ANI_POISON},
+	{"infernalbolt",	CONST_ANI_INFERNALBOLT},
+	{"huntingspear",	CONST_ANI_HUNTINGSPEAR},
+	{"enchantedspear",	CONST_ANI_ENCHANTEDSPEAR},
+	{"redstar",		CONST_ANI_REDSTAR},
+	{"greenstar",		CONST_ANI_GREENSTAR},
+	{"royalspear",		CONST_ANI_ROYALSPEAR},
+	{"sniperarrow",		CONST_ANI_SNIPERARROW},
+	{"onyxarrow",		CONST_ANI_ONYXARROW},
+	{"piercingbolt",	CONST_ANI_PIERCINGBOLT},
+	{"whirlwindsword",	CONST_ANI_WHIRLWINDSWORD},
+	{"whirlwindaxe",	CONST_ANI_WHIRLWINDAXE},
+	{"whirlwindclub",	CONST_ANI_WHIRLWINDCLUB},
+	{"etherealspear",	CONST_ANI_ETHEREALSPEAR},
+	{"ice",			CONST_ANI_ICE},
+	{"earth",		CONST_ANI_EARTH},
+	{"holy",		CONST_ANI_HOLY},
+	{"suddendeath",		CONST_ANI_SUDDENDEATH},
+	{"flasharrow",		CONST_ANI_FLASHARROW},
+	{"flammingarrow",	CONST_ANI_FLAMMINGARROW},
+	{"shiverarrow",		CONST_ANI_SHIVERARROW},
+	{"energyball",		CONST_ANI_ENERGYBALL},
+	{"smallice",		CONST_ANI_SMALLICE},
+	{"smallholy",		CONST_ANI_SMALLHOLY},
+	{"smallearth",		CONST_ANI_SMALLEARTH},
+	{"eartharrow",		CONST_ANI_EARTHARROW},
+	{"explosion",		CONST_ANI_EXPLOSION},
+	{"cake",		CONST_ANI_CAKE},
+	{"tarsalarrow",		CONST_ANI_TARSALARROW},
+	{"vortexbolt",		CONST_ANI_VORTEXBOLT},
+	{"prismaticbolt",	CONST_ANI_PRISMATICBOLT},
+	{"crystallinearrow",	CONST_ANI_CRYSTALLINEARROW},
+	{"drillbolt",		CONST_ANI_DRILLBOLT},
+	{"envenomedarrow",	CONST_ANI_ENVENOMEDARROW},
+	{"gloothspear",		CONST_ANI_GLOOTHSPEAR},
+	{"simplearrow",		CONST_ANI_SIMPLEARROW},
 };
 
 CombatTypeNames combatTypeNames = {
@@ -639,6 +654,10 @@ CombatTypeNames combatTypeNames = {
 	{COMBAT_LIFEDRAIN, 		"lifedrain"},
 	{COMBAT_MANADRAIN, 		"manadrain"},
 	{COMBAT_HEALING, 		"healing"},
+	{COMBAT_DROWNDAMAGE, 		"drown"},
+	{COMBAT_ICEDAMAGE, 		"ice"},
+	{COMBAT_HOLYDAMAGE, 		"holy"},
+	{COMBAT_DEATHDAMAGE, 		"death"},
 };
 
 AmmoTypeNames ammoTypeNames = {
@@ -679,6 +698,8 @@ SkullNames skullNames = {
 	{"green",	SKULL_GREEN},
 	{"white",	SKULL_WHITE},
 	{"red",		SKULL_RED},
+	{"black",	SKULL_BLACK},
+	{"orange",	SKULL_ORANGE},
 };
 
 MagicEffectClasses getMagicEffect(const std::string& strValue)
@@ -892,6 +913,14 @@ size_t combatTypeToIndex(CombatType_t combatType)
 			return 6;
 		case COMBAT_HEALING:
 			return 7;
+		case COMBAT_DROWNDAMAGE:
+			return 8;
+		case COMBAT_ICEDAMAGE:
+			return 9;
+		case COMBAT_HOLYDAMAGE:
+			return 10;
+		case COMBAT_DEATHDAMAGE:
+			return 11;
 		default:
 			return 0;
 	}
@@ -900,6 +929,26 @@ size_t combatTypeToIndex(CombatType_t combatType)
 CombatType_t indexToCombatType(size_t v)
 {
 	return static_cast<CombatType_t>(1 << v);
+}
+
+uint8_t serverFluidToClient(uint8_t serverFluid)
+{
+	uint8_t size = sizeof(clientToServerFluidMap) / sizeof(uint8_t);
+	for (uint8_t i = 0; i < size; ++i) {
+		if (clientToServerFluidMap[i] == serverFluid) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+uint8_t clientFluidToServer(uint8_t clientFluid)
+{
+	uint8_t size = sizeof(clientToServerFluidMap) / sizeof(uint8_t);
+	if (clientFluid >= size) {
+		return 0;
+	}
+	return clientToServerFluidMap[clientFluid];
 }
 
 itemAttrTypes stringToItemAttribute(const std::string& str)
@@ -952,16 +1001,12 @@ itemAttrTypes stringToItemAttribute(const std::string& str)
 		return ITEM_ATTRIBUTE_DOORID;
 	} else if (str == "decayto") {
 		return ITEM_ATTRIBUTE_DECAYTO;
+	} else if (str == "wrapid") {
+		return ITEM_ATTRIBUTE_WRAPID;
+	} else if (str == "storeitem") {
+		return ITEM_ATTRIBUTE_STOREITEM;
 	} else if (str == "attackspeed") {
 		return ITEM_ATTRIBUTE_ATTACK_SPEED;
-	} else if (str == "keynumber") {
-		return ITEM_ATTRIBUTE_KEYNUMBER;
-	} else if (str == "keyholenumber") {
-		return ITEM_ATTRIBUTE_KEYHOLENUMBER;
-	} else if (str == "doorquestnumber") {
-		return ITEM_ATTRIBUTE_DOORQUESTNUMBER;
-	} else if (str == "doorquestvalue") {
-		return ITEM_ATTRIBUTE_DOORQUESTVALUE;
 	}
 	return ITEM_ATTRIBUTE_NONE;
 }
@@ -992,7 +1037,7 @@ const char* getReturnMessage(ReturnValue value)
 			return "Drop the double-handed object first.";
 
 		case RETURNVALUE_BOTHHANDSNEEDTOBEFREE:
-			return "Both hands have to be free.";
+			return "Both hands need to be free.";
 
 		case RETURNVALUE_CANNOTBEDRESSED:
 			return "You cannot dress this object there.";
@@ -1016,7 +1061,7 @@ const char* getReturnMessage(ReturnValue value)
 			return "First go upstairs.";
 
 		case RETURNVALUE_NOTENOUGHCAPACITY:
-			return "This object is too heavy.";
+			return "This object is too heavy for you to carry.";
 
 		case RETURNVALUE_CONTAINERNOTENOUGHROOM:
 			return "You cannot put more objects in this container.";
@@ -1038,13 +1083,13 @@ const char* getReturnMessage(ReturnValue value)
 			return "This is impossible.";
 
 		case RETURNVALUE_PLAYERISPZLOCKED:
-			return "Characters who attacked other players may not enter a protection zone.";
+			return "You can not enter a protection zone after attacking another player.";
 
 		case RETURNVALUE_PLAYERISNOTINVITED:
 			return "You are not invited.";
 
 		case RETURNVALUE_CREATUREDOESNOTEXIST:
-			return "A creature with this name does not exist.";
+			return "Creature does not exist.";
 
 		case RETURNVALUE_DEPOTISFULL:
 			return "You cannot put more items in this depot.";
@@ -1055,11 +1100,14 @@ const char* getReturnMessage(ReturnValue value)
 		case RETURNVALUE_PLAYERWITHTHISNAMEISNOTONLINE:
 			return "A player with this name is not online.";
 
+		case RETURNVALUE_NOTREQUIREDLEVELTOUSERUNE:
+			return "You do not have the required magic level to use this rune.";
+
 		case RETURNVALUE_YOUAREALREADYTRADING:
 			return "You are already trading. Finish this trade first.";
 
 		case RETURNVALUE_THISPLAYERISALREADYTRADING:
-			return "This person is already trading.";
+			return "This player is already trading.";
 
 		case RETURNVALUE_YOUMAYNOTLOGOUTDURINGAFIGHT:
 			return "You may not logout during or immediately after a fight!";
@@ -1071,13 +1119,13 @@ const char* getReturnMessage(ReturnValue value)
 			return "Your level is too low.";
 
 		case RETURNVALUE_NOTENOUGHMAGICLEVEL:
-			return "Your magic level is too low.";
+			return "You do not have enough magic level.";
 
 		case RETURNVALUE_NOTENOUGHMANA:
 			return "You do not have enough mana.";
 
 		case RETURNVALUE_NOTENOUGHSOUL:
-			return "You do not have enough soulpoints.";
+			return "You do not have enough soul.";
 
 		case RETURNVALUE_YOUAREEXHAUSTED:
 			return "You are exhausted.";
@@ -1086,7 +1134,7 @@ const char* getReturnMessage(ReturnValue value)
 			return "You cannot use objects that fast.";
 
 		case RETURNVALUE_CANONLYUSETHISRUNEONCREATURES:
-			return "You can only use this rune on creatures.";
+			return "You can only use it on creatures.";
 
 		case RETURNVALUE_PLAYERISNOTREACHABLE:
 			return "Player is not reachable.";
@@ -1140,10 +1188,16 @@ const char* getReturnMessage(ReturnValue value)
 			return "You can not logout here.";
 
 		case RETURNVALUE_YOUNEEDAMAGICITEMTOCASTSPELL:
-			return "A magic item is necessary to cast this spell.";
+			return "You need a magic item to cast this spell.";
+
+		case RETURNVALUE_CANNOTCONJUREITEMHERE:
+			return "You cannot conjure items here.";
+
+		case RETURNVALUE_YOUNEEDTOSPLITYOURSPEARS:
+			return "You need to split your spears first.";
 
 		case RETURNVALUE_NAMEISTOOAMBIGUOUS:
-			return "Playername is ambiguous.";
+			return "Player name is ambiguous.";
 
 		case RETURNVALUE_CANONLYUSEONESHIELD:
 			return "You may use only one shield.";
@@ -1178,8 +1232,14 @@ const char* getReturnMessage(ReturnValue value)
 		case RETURNVALUE_YOUDONTHAVEREQUIREDPROFESSION:
 			return "You don't have the required profession.";
 
+		case RETURNVALUE_CANNOTMOVEITEMISNOTSTOREITEM:
+			return "You cannot move this item into your Store inbox as it was not bought in the Store.";
+
 		case RETURNVALUE_ITEMCANNOTBEMOVEDTHERE:
 			return "This item cannot be moved there.";
+
+		case RETURNVALUE_YOUCANNOTUSETHISBED:
+			return "This bed can't be used, but Premium Account players can rent houses and sleep in beds there to regain health and mana.";
 
 		default: // RETURNVALUE_NOTPOSSIBLE, etc
 			return "Sorry, not possible.";
@@ -1189,4 +1249,20 @@ const char* getReturnMessage(ReturnValue value)
 int64_t OTSYS_TIME()
 {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+SpellGroup_t stringToSpellGroup(const std::string& value)
+{
+	std::string tmpStr = asLowerCaseString(value);
+	if (tmpStr == "attack" || tmpStr == "1") {
+		return SPELLGROUP_ATTACK;
+	} else if (tmpStr == "healing" || tmpStr == "2") {
+		return SPELLGROUP_HEALING;
+	} else if (tmpStr == "support" || tmpStr == "3") {
+		return SPELLGROUP_SUPPORT;
+	} else if (tmpStr == "special" || tmpStr == "4") {
+		return SPELLGROUP_SPECIAL;
+	}
+
+	return SPELLGROUP_NONE;
 }

@@ -1,16 +1,28 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
 #include "mailbox.h"
 #include "game.h"
 #include "iologindata.h"
-#include "configmanager.h"
 
-#include <boost/algorithm/string.hpp>
-
-extern ConfigManager g_config;
 extern Game g_game;
 
 ReturnValue Mailbox::queryAdd(int32_t, const Thing& thing, uint32_t, uint32_t, Creature*) const
@@ -47,21 +59,6 @@ void Mailbox::addThing(int32_t, Thing* thing)
 {
 	Item* item = thing->getItem();
 	if (item && Mailbox::canSend(item)) {
-		if (!g_config.getBoolean(ConfigManager::TRASHABLE_MAILBOX)) {
-			const TileItemVector* items = getTile()->getItemList();
-			if (items) {
-				uint32_t movableItemCount = 0;
-				for (const Item* item : *items) {
-					if (item->isMoveable()) {
-						movableItemCount++;
-					}
-
-					if (movableItemCount > 1) {
-						return;
-					}
-				}
-			}
-		}
 		sendItem(item);
 	}
 }
@@ -93,35 +90,22 @@ void Mailbox::postRemoveNotification(Thing* thing, const Cylinder* newParent, in
 
 bool Mailbox::sendItem(Item* item) const
 {
-	std::string receiver, townName;
-	if (!getReceiver(item, receiver, townName)) {
+	std::string receiver;
+	uint32_t depotId = 0;
+	if (!getReceiver(item, receiver, depotId)) {
 		return false;
 	}
 
 	/**No need to continue if its still empty**/
-	if (receiver.empty()) {
+	if (receiver.empty() || depotId == 0) {
 		return false;
-	}
-
-	Town* town = g_game.map.towns.getTown(townName);
-	if (!town) {
-		return false;
-	}
-
-	StringVector disabledMailboxes = explodeString(g_config.getString(ConfigManager::DISABLED_MAILBOXES), ",");
-	for (const std::string& disabledTownName : disabledMailboxes) {
-		if (boost::iequals(disabledTownName, town->getName())) {
-			return false;
-		}
 	}
 
 	Player* player = g_game.getPlayerByName(receiver);
 	if (player) {
-		DepotLocker* depotLocker = player->getDepotLocker(town->getID(), true);
+		DepotLocker* depotLocker = player->getDepotLocker(depotId);
 		if (depotLocker) {
-			if (g_game.internalMoveItem(item->getParent(), depotLocker, INDEX_WHEREEVER,
-				item, item->getItemCount(), nullptr, FLAG_NOLIMIT) == RETURNVALUE_NOERROR) {
-				player->setLastDepotId(town->getID());
+			if (g_game.internalMoveItem(item->getParent(), depotLocker, INDEX_WHEREEVER, item, item->getItemCount(), nullptr) == RETURNVALUE_NOERROR) {
 				g_game.transformItem(item, item->getID() + 1);
 				player->onReceiveMail();
 				return true;
@@ -133,13 +117,10 @@ bool Mailbox::sendItem(Item* item) const
 			return false;
 		}
 
-		DepotLocker* depotLocker = tmpPlayer.getDepotLocker(town->getID(), true);
-		if (depotLocker) {
-			if (g_game.internalMoveItem(item->getParent(), depotLocker, INDEX_WHEREEVER,
-				item, item->getItemCount(), nullptr, FLAG_NOLIMIT) == RETURNVALUE_NOERROR) {
-				tmpPlayer.setLastDepotId(town->getID());
+		if (DepotLocker* depotLocker = tmpPlayer.getDepotLocker(depotId)) {
+			if (g_game.internalMoveItem(item->getParent(), depotLocker, INDEX_WHEREEVER, item, item->getItemCount(), nullptr) == RETURNVALUE_NOERROR) {
 				g_game.transformItem(item, item->getID() + 1);
-				IOLoginData::savePlayer(&tmpPlayer, true);
+				IOLoginData::savePlayer(&tmpPlayer);
 				return true;
 			}
 		}
@@ -147,12 +128,12 @@ bool Mailbox::sendItem(Item* item) const
 	return false;
 }
 
-bool Mailbox::getReceiver(Item* item, std::string& name, std::string& town) const
+bool Mailbox::getReceiver(Item* item, std::string& name, uint32_t& depotId) const
 {
 	const Container* container = item->getContainer();
 	if (container) {
 		for (Item* containerItem : container->getItemList()) {
-			if (containerItem->getID() == ITEM_LABEL && getReceiver(containerItem, name, town)) {
+			if (containerItem->getID() == ITEM_LABEL && getReceiver(containerItem, name, depotId)) {
 				return true;
 			}
 		}
@@ -164,27 +145,19 @@ bool Mailbox::getReceiver(Item* item, std::string& name, std::string& town) cons
 		return false;
 	}
 
-	std::istringstream iss(text, std::istringstream::in);
-	std::string temp;
-	uint32_t currentLine = 1;
-
-	while (getline(iss, temp, '\n')) {
-		if (currentLine == 1) {
-			name = temp;
-		}
-		else if (currentLine == 2) {
-			town = temp;
-		}
-		else {
-			break;
-		}
-
-		++currentLine;
-	}
+	std::string townName;
+	std::istringstream iss(item->getText(), std::istringstream::in);
+	getline(iss, name, '\n');
+	getline(iss, townName, '\n');
 
 	trimString(name);
-	trimString(town);
-	return true;
+	Town* town = g_game.map.towns.getTown(townName);
+	if (town) {
+		depotId = town->getID();
+		return true;
+	}
+
+	return false;
 }
 
 bool Mailbox::canSend(const Item* item)

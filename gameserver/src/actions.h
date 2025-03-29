@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_ACTIONS_H_87F60C5F587E4B84948F304A6451E6E6
+#define FS_ACTIONS_H_87F60C5F587E4B84948F304A6451E6E6
 
 #include "baseevents.h"
 #include "enums.h"
@@ -9,7 +26,7 @@
 
 class Action;
 using Action_ptr = std::unique_ptr<Action>;
-using ActionFunction = std::function<bool(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition)>;
+using ActionFunction = std::function<bool(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition, bool isHotkey)>;
 
 class Action : public Event
 {
@@ -17,10 +34,11 @@ class Action : public Event
 		explicit Action(LuaScriptInterface* interface);
 
 		bool configureEvent(const pugi::xml_node& node) override;
+		bool loadFunction(const pugi::xml_attribute& attr, bool isScripted) override;
 
 		//scripting
 		virtual bool executeUse(Player* player, Item* item, const Position& fromPosition,
-			Thing* target, const Position& toPosition);
+			Thing* target, const Position& toPosition, bool isHotkey);
 
 		bool getAllowFarUse() const {
 			return allowFarUse;
@@ -43,30 +61,21 @@ class Action : public Event
 			checkFloor = v;
 		}
 
-		void clearItemIdRange() {
-			return ids.clear();
-		}
-		const std::vector<uint16_t>& getItemIdRange() const {
+		std::vector<uint16_t> getItemIdRange() {
 			return ids;
 		}
 		void addItemId(uint16_t id) {
 			ids.emplace_back(id);
 		}
 
-		void clearUniqueIdRange() {
-			return uids.clear();
-		}
-		const std::vector<uint16_t>& getUniqueIdRange() const {
+		std::vector<uint16_t> getUniqueIdRange() {
 			return uids;
 		}
 		void addUniqueId(uint16_t id) {
 			uids.emplace_back(id);
 		}
 
-		void clearActionIdRange() {
-			return aids.clear();
-		}
-		const std::vector<uint16_t>& getActionIdRange() const {
+		std::vector<uint16_t> getActionIdRange() {
 			return aids;
 		}
 		void addActionId(uint16_t id) {
@@ -78,6 +87,8 @@ class Action : public Event
 			return false;
 		}
 		virtual Thing* getTarget(Player* player, Creature* targetCreature, const Position& toPosition, uint8_t toStackPos) const;
+
+		ActionFunction function;
 
 	private:
 		std::string getScriptEventName() const override;
@@ -100,8 +111,8 @@ class Actions final : public BaseEvents
 		Actions(const Actions&) = delete;
 		Actions& operator=(const Actions&) = delete;
 
-		bool useItem(Player* player, const Position& pos, uint8_t index, Item* item);
-		bool useItemEx(Player* player, const Position& fromPos, const Position& toPos, uint8_t toStackPos, uint16_t toSpriteId, Item* item, Creature* creature = nullptr);
+		bool useItem(Player* player, const Position& pos, uint8_t index, Item* item, bool isHotkey);
+		bool useItemEx(Player* player, const Position& fromPos, const Position& toPos, uint8_t toStackPos, Item* item, bool isHotkey, Creature* creature = nullptr);
 
 		ReturnValue canUse(const Player* player, const Position& pos);
 		ReturnValue canUse(const Player* player, const Position& pos, const Item* item);
@@ -111,7 +122,7 @@ class Actions final : public BaseEvents
 		void clear(bool fromLua) override final;
 
 	private:
-		ReturnValue internalUseItem(Player* player, const Position& pos, uint8_t index, Item* item);
+		ReturnValue internalUseItem(Player* player, const Position& pos, uint8_t index, Item* item, bool isHotkey);
 
 		LuaScriptInterface& getScriptInterface() override;
 		std::string getScriptBaseName() const override;
@@ -128,3 +139,5 @@ class Actions final : public BaseEvents
 
 		LuaScriptInterface scriptInterface;
 };
+
+#endif

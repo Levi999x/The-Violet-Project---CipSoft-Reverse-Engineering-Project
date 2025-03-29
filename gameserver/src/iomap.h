@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_IOMAP_H_8085D4B1037A44288494A52FDBB775E4
+#define FS_IOMAP_H_8085D4B1037A44288494A52FDBB775E4
 
 #include "item.h"
 #include "map.h"
@@ -34,12 +51,6 @@ enum OTBM_AttrTypes_t {
 	OTBM_ATTR_SLEEPERGUID = 20,
 	OTBM_ATTR_SLEEPSTART = 21,
 	OTBM_ATTR_CHARGES = 22,
-	OTBM_ATTR_KEYNUMBER = 23,
-	OTBM_ATTR_KEYHOLENUMBER = 24,
-	OTBM_ATTR_DOORQUESTNUMBER = 25,
-	OTBM_ATTR_DOORQUESTVALUE = 26,
-	OTBM_ATTR_DOORLEVEL = 27,
-	OTBM_ATTR_CHESTQUESTNUMBER = 28,
 };
 
 enum OTBM_NodeTypes_t {
@@ -65,8 +76,7 @@ enum OTBM_TileFlag_t : uint32_t {
 	OTBM_TILEFLAG_PROTECTIONZONE = 1 << 0,
 	OTBM_TILEFLAG_NOPVPZONE = 1 << 2,
 	OTBM_TILEFLAG_NOLOGOUT = 1 << 3,
-	OTBM_TILEFLAG_PVPZONE = 1 << 4,
-	OTBM_TILEFLAG_REFRESH = 1 << 5,
+	OTBM_TILEFLAG_PVPZONE = 1 << 4
 };
 
 #pragma pack(1)
@@ -97,7 +107,7 @@ class IOMap
 	static Tile* createTile(Item*& ground, Item* item, uint16_t x, uint16_t y, uint8_t z);
 
 	public:
-		bool loadMap(Map* map, const std::string& fileName, bool replaceExistingTiles = false);
+		bool loadMap(Map* map, const std::string& fileName);
 
 		/* Load the spawns
 		 * \param map pointer to the Map class
@@ -141,6 +151,8 @@ class IOMap
 		bool parseMapDataAttributes(OTB::Loader& loader, const OTB::Node& mapNode, Map& map, const std::string& fileName);
 		bool parseWaypoints(OTB::Loader& loader, const OTB::Node& waypointsNode, Map& map);
 		bool parseTowns(OTB::Loader& loader, const OTB::Node& townsNode, Map& map);
-		bool parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Map& map, bool replaceExistingTiles = false);
+		bool parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Map& map);
 		std::string errorString;
 };
+
+#endif

@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_PROTOCOL_H_D71405071ACF4137A4B1203899DE80E1
+#define FS_PROTOCOL_H_D71405071ACF4137A4B1203899DE80E1
 
 #include "connection.h"
 #include "xtea.h"
@@ -17,7 +34,6 @@ class Protocol : public std::enable_shared_from_this<Protocol>
 		Protocol& operator=(const Protocol&) = delete;
 
 		virtual void parsePacket(NetworkMessage&) {}
-		virtual void parsePacketOnDispatcher(NetworkMessage) {}
 
 		virtual void onSendMessage(const OutputMessage_ptr& msg) const;
 		void onRecvMessage(NetworkMessage& msg);
@@ -59,6 +75,9 @@ class Protocol : public std::enable_shared_from_this<Protocol>
 		void setXTEAKey(const xtea::key& key) {
 			this->key = xtea::expand_key(key);
 		}
+		void disableChecksum() {
+			checksumEnabled = false;
+		}
 
 		static bool RSA_decrypt(NetworkMessage& msg);
 
@@ -76,5 +95,8 @@ class Protocol : public std::enable_shared_from_this<Protocol>
 		const ConnectionWeak_ptr connection;
 		xtea::round_keys key;
 		bool encryptionEnabled = false;
+		bool checksumEnabled = false;
 		bool rawMessages = false;
 };
+
+#endif

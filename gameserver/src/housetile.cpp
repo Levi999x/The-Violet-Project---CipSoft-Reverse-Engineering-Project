@@ -1,5 +1,21 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "otpch.h"
 
@@ -48,11 +64,9 @@ void HouseTile::updateHouse(Item* item)
 
 	Door* door = item->getDoor();
 	if (door) {
-		if (door->getDoorId() == 0) {
-			static uint32_t nextEmptyDoorId = 1000;
-			door->setDoorId(nextEmptyDoorId++);
+		if (door->getDoorId() != 0) {
+			house->addDoor(door);
 		}
-		house->addDoor(door);
 	} else {
 		BedItem* bed = item->getBed();
 		if (bed) {
@@ -72,19 +86,17 @@ ReturnValue HouseTile::queryAdd(int32_t index, const Thing& thing, uint32_t coun
 			return RETURNVALUE_NOTPOSSIBLE;
 		}
 	} else if (const Item* item = thing.getItem()) {
-		if (g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_ADD_HOUSE_ITEMS) && actor) {
+		if (item->isStoreItem() && !item->hasAttribute(ITEM_ATTRIBUTE_WRAPID)) {
+			return RETURNVALUE_ITEMCANNOTBEMOVEDTHERE;
+		}
+
+		if (actor) {
 			Player* actorPlayer = actor->getPlayer();
 			if (!house->isInvited(actorPlayer)) {
 				return RETURNVALUE_CANNOTTHROW;
 			}
 		}
-
-		const TileItemVector* items = getItemList();
-		if (items && items->size() >= g_config.getNumber(ConfigManager::HOUSE_TILE_ITEM_LIMIT)) {
-			return RETURNVALUE_NOTPOSSIBLE;
-		}
 	}
-
 	return Tile::queryAdd(index, thing, count, flags, actor);
 }
 
@@ -127,7 +139,7 @@ ReturnValue HouseTile::queryRemove(const Thing& thing, uint32_t count, uint32_t 
 	if (actor && g_config.getBoolean(ConfigManager::ONLY_INVITED_CAN_MOVE_HOUSE_ITEMS)) {
 		Player* actorPlayer = actor->getPlayer();
 		if (!house->isInvited(actorPlayer)) {
-			return RETURNVALUE_PLAYERISNOTINVITED;
+			return RETURNVALUE_NOTPOSSIBLE;
 		}
 	}
 	return Tile::queryRemove(thing, count, flags);

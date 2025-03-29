@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_SERVER_H_984DA68ABF744127850F90CC710F281B
+#define FS_SERVER_H_984DA68ABF744127850F90CC710F281B
 
 #include "connection.h"
 #include "signals.h"
@@ -13,6 +30,7 @@ class ServiceBase
 {
 	public:
 		virtual bool is_single_socket() const = 0;
+		virtual bool is_checksummed() const = 0;
 		virtual uint8_t get_protocol_identifier() const = 0;
 		virtual const char* get_protocol_name() const = 0;
 
@@ -25,6 +43,9 @@ class Service final : public ServiceBase
 	public:
 		bool is_single_socket() const override {
 			return ProtocolType::server_sends_first;
+		}
+		bool is_checksummed() const override {
+			return ProtocolType::use_checksum;
 		}
 		uint8_t get_protocol_identifier() const override {
 			return ProtocolType::protocol_identifier;
@@ -55,7 +76,7 @@ class ServicePort : public std::enable_shared_from_this<ServicePort>
 		std::string get_protocol_names() const;
 
 		bool add_service(const Service_ptr& new_svc);
-		Protocol_ptr make_protocol(NetworkMessage& msg, const Connection_ptr& connection) const;
+		Protocol_ptr make_protocol(bool checksummed, NetworkMessage& msg, const Connection_ptr& connection) const;
 
 		void onStopServer();
 		void onAccept(Connection_ptr connection, const boost::system::error_code& error);
@@ -131,3 +152,5 @@ bool ServiceManager::add(uint16_t port)
 
 	return service_port->add_service(std::make_shared<Service<ProtocolType>>());
 }
+
+#endif

@@ -1,7 +1,24 @@
-// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
-// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
+/**
+ * The Forgotten Server - a free and open-source MMORPG server emulator
+ * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#pragma once
+#ifndef FS_TILE_H_96C7EE7CF8CD48E59D5D554A181F0C56
+#define FS_TILE_H_96C7EE7CF8CD48E59D5D554A181F0C56
 
 #include "cylinder.h"
 #include "item.h"
@@ -33,21 +50,19 @@ enum tileflags_t : uint32_t {
 	TILESTATE_NOPVPZONE = 1 << 8,
 	TILESTATE_NOLOGOUT = 1 << 9,
 	TILESTATE_PVPZONE = 1 << 10,
-	TILESTATE_REFRESH = 1 << 11,
-	TILESTATE_TELEPORT = 1 << 12,
-	TILESTATE_MAGICFIELD = 1 << 13,
-	TILESTATE_MAILBOX = 1 << 14,
-	TILESTATE_TRASHHOLDER = 1 << 15,
-	TILESTATE_BED = 1 << 16,
-	TILESTATE_DEPOT = 1 << 17,
-	TILESTATE_BLOCKSOLID = 1 << 18,
-	TILESTATE_BLOCKPATH = 1 << 19,
-	TILESTATE_IMMOVABLEBLOCKSOLID = 1 << 20,
-	TILESTATE_IMMOVABLEBLOCKPATH = 1 << 21,
-	TILESTATE_IMMOVABLENOFIELDBLOCKPATH = 1 << 22,
-	TILESTATE_NOFIELDBLOCKPATH = 1 << 23,
-	TILESTATE_SUPPORTS_HANGABLE = 1 << 24,
-	TILESTATE_SPECIALFIELDBLOCKPATH = 1 << 25,
+	TILESTATE_TELEPORT = 1 << 11,
+	TILESTATE_MAGICFIELD = 1 << 12,
+	TILESTATE_MAILBOX = 1 << 13,
+	TILESTATE_TRASHHOLDER = 1 << 14,
+	TILESTATE_BED = 1 << 15,
+	TILESTATE_DEPOT = 1 << 16,
+	TILESTATE_BLOCKSOLID = 1 << 17,
+	TILESTATE_BLOCKPATH = 1 << 18,
+	TILESTATE_IMMOVABLEBLOCKSOLID = 1 << 19,
+	TILESTATE_IMMOVABLEBLOCKPATH = 1 << 20,
+	TILESTATE_IMMOVABLENOFIELDBLOCKPATH = 1 << 21,
+	TILESTATE_NOFIELDBLOCKPATH = 1 << 22,
+	TILESTATE_SUPPORTS_HANGABLE = 1 << 23,
 
 	TILESTATE_FLOORCHANGE = TILESTATE_FLOORCHANGE_DOWN | TILESTATE_FLOORCHANGE_NORTH | TILESTATE_FLOORCHANGE_SOUTH | TILESTATE_FLOORCHANGE_EAST | TILESTATE_FLOORCHANGE_WEST | TILESTATE_FLOORCHANGE_SOUTH_ALT | TILESTATE_FLOORCHANGE_EAST_ALT,
 };
@@ -58,7 +73,6 @@ enum ZoneType_t {
 	ZONE_PVP,
 	ZONE_NOLOGOUT,
 	ZONE_NORMAL,
-	ZONE_REFRESH,
 };
 
 class TileItemVector : private ItemVector
@@ -148,7 +162,6 @@ class Tile : public Cylinder
 		virtual TileItemVector* getItemList() = 0;
 		virtual const TileItemVector* getItemList() const = 0;
 		virtual TileItemVector* makeItemList() = 0;
-		virtual TileItemVector* getRefreshableItemList() = 0;
 
 		virtual CreatureVector* getCreatures() = 0;
 		virtual const CreatureVector* getCreatures() const = 0;
@@ -161,18 +174,16 @@ class Tile : public Cylinder
 			return false;
 		}
 
-		Door* getDoorItem() const;
 		MagicField* getFieldItem() const;
 		Teleport* getTeleportItem() const;
 		TrashHolder* getTrashHolder() const;
 		Mailbox* getMailbox() const;
 		BedItem* getBedItem() const;
-		Item* getSplashItem() const;
 
 		Creature* getTopCreature() const;
 		const Creature* getBottomCreature() const;
 		Creature* getTopVisibleCreature(const Creature* creature) const;
-		Creature* getBottomVisibleCreature(const Creature* creature) const;
+		const Creature* getBottomVisibleCreature(const Creature* creature) const;
 		Item* getTopTopItem() const;
 		Item* getTopDownItem() const;
 		bool isMoveableBlocking() const;
@@ -192,20 +203,9 @@ class Tile : public Cylinder
 		uint32_t getTopItemCount() const;
 		uint32_t getDownItemCount() const;
 
-		virtual void makeRefreshItemList() = 0;
-		virtual void refresh() = 0;
-		virtual void cleanItems() = 0;
-		virtual void cleanHouseItems() = 0;
-
 		bool hasProperty(ITEMPROPERTY prop) const;
 		bool hasProperty(const Item* exclude, ITEMPROPERTY prop) const;
 
-		void setFlags(uint32_t flags) {
-			this->flags = flags;
-		}
-		uint32_t getFlags() const {
-			return this->flags;
-		}
 		bool hasFlag(uint32_t flag) const {
 			return hasBitSet(flag, this->flags);
 		}
@@ -223,24 +223,21 @@ class Tile : public Cylinder
 				return ZONE_NOPVP;
 			} else if (hasFlag(TILESTATE_PVPZONE)) {
 				return ZONE_PVP;
-			} else if (hasFlag(TILESTATE_REFRESH)) {
-				return ZONE_REFRESH;
-			} else {
-				return ZONE_NORMAL;
 			}
+			return ZONE_NORMAL;
 		}
 
-		bool hasHeight(uint32_t n) const;
+		uint32_t getHeight() const {
+			return height;
+		}
+		bool hasHeight(uint32_t n) const {
+			return height == n;
+		}
 
 		std::string getDescription(int32_t lookDistance) const override final;
 
 		int32_t getClientIndexOfCreature(const Player* player, const Creature* creature) const;
 		int32_t getStackposOfItem(const Player* player, const Item* item) const;
-
-		void updateRefreshTime();
-		int64_t getNextRefreshTime() const {
-			return nextRefreshTime;
-		}
 
 		//cylinder implementations
 		ReturnValue queryAdd(int32_t index, const Thing& thing, uint32_t count,
@@ -280,7 +277,7 @@ class Tile : public Cylinder
 			return false;
 		}
 
-		Item* getUseItem() const;
+		Item* getUseItem(int32_t index) const;
 
 		Item* getGround() const {
 			return ground;
@@ -301,7 +298,7 @@ class Tile : public Cylinder
 		Item* ground = nullptr;
 		Position tilePos;
 		uint32_t flags = 0;
-		int64_t nextRefreshTime = 0;
+		uint32_t height = 0;
 };
 
 // Used for walkable tiles, where there is high likeliness of
@@ -309,7 +306,6 @@ class Tile : public Cylinder
 class DynamicTile : public Tile
 {
 		// By allocating the vectors in-house, we avoid some memory fragmentation
-		TileItemVector refreshableItems;
 		TileItemVector items;
 		CreatureVector creatures;
 
@@ -317,12 +313,6 @@ class DynamicTile : public Tile
 		DynamicTile(uint16_t x, uint16_t y, uint8_t z) : Tile(x, y, z) {}
 		~DynamicTile() {
 			for (Item* item : items) {
-				item->setParent(nullptr);
-				item->decrementReferenceCounter();
-			}
-
-			for (Item* item : refreshableItems) {
-				item->setParent(nullptr);
 				item->decrementReferenceCounter();
 			}
 		}
@@ -341,10 +331,6 @@ class DynamicTile : public Tile
 			return &items;
 		}
 
-		TileItemVector* getRefreshableItemList() override {
-			return &refreshableItems;
-		}
-
 		CreatureVector* getCreatures() override {
 			return &creatures;
 		}
@@ -354,18 +340,12 @@ class DynamicTile : public Tile
 		CreatureVector* makeCreatures() override {
 			return &creatures;
 		}
-
-		void makeRefreshItemList() override;
-		void refresh() override;
-		void cleanItems() override;
-		void cleanHouseItems() override;
 };
 
 // For blocking tiles, where we very rarely actually have items
 class StaticTile final : public Tile
 {
 	// We very rarely even need the vectors, so don't keep them in memory
-	std::unique_ptr<TileItemVector> refreshableItems;
 	std::unique_ptr<TileItemVector> items;
 	std::unique_ptr<CreatureVector> creatures;
 
@@ -374,14 +354,6 @@ class StaticTile final : public Tile
 		~StaticTile() {
 			if (items) {
 				for (Item* item : *items) {
-					item->setParent(nullptr);
-					item->decrementReferenceCounter();
-				}
-			}
-
-			if (refreshableItems) {
-				for (Item* item : *refreshableItems) {
-					item->setParent(nullptr);
 					item->decrementReferenceCounter();
 				}
 			}
@@ -404,13 +376,6 @@ class StaticTile final : public Tile
 			return items.get();
 		}
 
-		TileItemVector* getRefreshableItemList() override {
-			if (!refreshableItems) {
-				refreshableItems.reset(new TileItemVector);
-			}
-			return refreshableItems.get();
-		}
-
 		CreatureVector* getCreatures() override {
 			return creatures.get();
 		}
@@ -423,9 +388,6 @@ class StaticTile final : public Tile
 			}
 			return creatures.get();
 		}
-
-		void makeRefreshItemList() override;
-		void refresh() override;
-		void cleanItems() override;
-		void cleanHouseItems() override;
 };
+
+#endif
