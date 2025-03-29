@@ -1,27 +1,12 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
 #include "iomap.h"
 
 #include "bed.h"
+#include "game.h"
 
 #include <fmt/format.h>
 
@@ -68,8 +53,10 @@ Tile* IOMap::createTile(Item*& ground, Item* item, uint16_t x, uint16_t y, uint8
 	return tile;
 }
 
-bool IOMap::loadMap(Map* map, const std::string& fileName)
+bool IOMap::loadMap(Map* map, const std::string& fileName, bool replaceExistingTiles)
 {
+	std::cout << "> Loading " << fileName << std::endl;
+
 	int64_t start = OTSYS_TIME();
 	try {
 		OTB::Loader loader{fileName, OTB::Identifier{{'O', 'T', 'B', 'M'}}};
@@ -88,7 +75,7 @@ bool IOMap::loadMap(Map* map, const std::string& fileName)
 		}
 
 		uint32_t headerVersion = root_header.version;
-		/*if (headerVersion == 0) {
+		if (headerVersion == 0) {
 			//In otbm version 1 the count variable after splashes/fluidcontainers and stackables
 			//are saved as attributes instead, this solves a lot of problems with items
 			//that are changed (stackable/charges/fluidcontainer/splash) during an update.
@@ -96,38 +83,13 @@ bool IOMap::loadMap(Map* map, const std::string& fileName)
 			return false;
 		}
 
-			WARNING: I had to comment that to make the server load my 7.6 rme generated map, read the note ^.
-		*/
-
 		if (headerVersion > 2) {
 			setLastErrorString("Unknown OTBM version detected.");
 			return false;
 		}
 
-		/*
-		if (root_header.majorVersionItems < 3) {
-			setLastErrorString("This map need to be upgraded by using the latest map editor version to be able to load correctly.");
-			return false;
-		}
+		std::cout << "> Map size:" << root_header.width << "x" << root_header.height << '.' << std::endl;
 
-		if (root_header.majorVersionItems > Item::items.majorVersion) {
-			setLastErrorString("The map was saved with a different items.otb version, an upgraded items.otb is required.");
-			return false;
-		}
-		*/
-
-		//if (root_header.minorVersionItems < CLIENT_VERSION_810) {
-		if (root_header.minorVersionItems < CLIENT_VERSION_760) {
-			setLastErrorString("This map needs to be updated.");
-			return false;
-		}
-
-		if (root_header.minorVersionItems > Item::items.minorVersion) {
-			std::cout << "[Warning - IOMap::loadMap] This map needs an updated items.otb." << std::endl;
-		}
-
-        Item::setMapVersion(root_header.version);
-		std::cout << "> Map size: " << root_header.width << "x" << root_header.height << '.' << std::endl;
 		map->width = root_header.width;
 		map->height = root_header.height;
 
@@ -143,7 +105,7 @@ bool IOMap::loadMap(Map* map, const std::string& fileName)
 
 		for (auto& mapDataNode : mapNode.children) {
 			if (mapDataNode.type == OTBM_TILE_AREA) {
-				if (!parseTileArea(loader, mapDataNode, *map)) {
+				if (!parseTileArea(loader, mapDataNode, *map, replaceExistingTiles)) {
 					return false;
 				}
 			} else if (mapDataNode.type == OTBM_TOWNS) {
@@ -217,7 +179,7 @@ bool IOMap::parseMapDataAttributes(OTB::Loader& loader, const OTB::Node& mapNode
 	return true;
 }
 
-bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Map& map)
+bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Map& map, bool replaceExistingTiles)
 {
 	PropStream propStream;
 	if (!loader.getProps(tileAreaNode, propStream)) {
@@ -255,6 +217,7 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 		uint16_t x = base_x + tile_coord.x;
 		uint16_t y = base_y + tile_coord.y;
 
+		bool allowDecay = map.getTile(x, y, z) == nullptr || replaceExistingTiles;
 		bool isHouseTile = false;
 		House* house = nullptr;
 		Tile* tile = nullptr;
@@ -292,15 +255,23 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 
 					if ((flags & OTBM_TILEFLAG_PROTECTIONZONE) != 0) {
 						tileflags |= TILESTATE_PROTECTIONZONE;
-					} else if ((flags & OTBM_TILEFLAG_NOPVPZONE) != 0) {
+					} 
+					
+					// cannot be both
+					if ((flags & OTBM_TILEFLAG_NOPVPZONE) != 0) {
 						tileflags |= TILESTATE_NOPVPZONE;
 					} else if ((flags & OTBM_TILEFLAG_PVPZONE) != 0) {
 						tileflags |= TILESTATE_PVPZONE;
+					} 
+					
+					if ((flags & OTBM_TILEFLAG_REFRESH) != 0) {
+						tileflags |= TILESTATE_REFRESH;
 					}
 
 					if ((flags & OTBM_TILEFLAG_NOLOGOUT) != 0) {
 						tileflags |= TILESTATE_NOLOGOUT;
 					}
+
 					break;
 				}
 
@@ -311,27 +282,22 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 						return false;
 					}
 
-					if (isHouseTile && item->isMoveable()) {
-						std::cout << "[Warning - IOMap::loadMap] Moveable item with ID: " << item->getID() << ", in house: " << house->getId() << ", at position [x: " << x << ", y: " << y << ", z: " << z << "]." << std::endl;
-						delete item;
-					} else {
-						if (item->getItemCount() == 0) {
-							item->setItemCount(1);
-						}
+					if (item->getItemCount() == 0) {
+						item->setItemCount(1);
+					}
 
-						if (tile) {
-							tile->internalAddThing(item);
+					if (tile) {
+						tile->internalAddThing(item);
+						if (allowDecay) {
 							item->startDecaying();
-							item->setLoadedFromMap(true);
-						} else if (item->isGroundTile()) {
-							delete ground_item;
-							ground_item = item;
-						} else {
-							tile = createTile(ground_item, item, x, y, z);
-							tile->internalAddThing(item);
-							item->startDecaying();
-							item->setLoadedFromMap(true);
 						}
+					} else if (item->isGroundTile()) {
+						delete ground_item;
+						ground_item = item;
+					} else {
+						tile = createTile(ground_item, item, x, y, z);
+						tile->internalAddThing(item);
+						item->startDecaying();
 					}
 					break;
 				}
@@ -366,27 +332,22 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 				return false;
 			}
 
-			if (isHouseTile && item->isMoveable()) {
-				std::cout << "[Warning - IOMap::loadMap] Moveable item with ID: " << item->getID() << ", in house: " << house->getId() << ", at position [x: " << x << ", y: " << y << ", z: " << z << "]." << std::endl;
-				delete item;
-			} else {
-				if (item->getItemCount() == 0) {
-					item->setItemCount(1);
-				}
+			if (item->getItemCount() == 0) {
+				item->setItemCount(1);
+			}
 
-				if (tile) {
-					tile->internalAddThing(item);
+			if (tile) {
+				tile->internalAddThing(item);
+				if (allowDecay) {
 					item->startDecaying();
-					item->setLoadedFromMap(true);
-				} else if (item->isGroundTile()) {
-					delete ground_item;
-					ground_item = item;
-				} else {
-					tile = createTile(ground_item, item, x, y, z);
-					tile->internalAddThing(item);
-					item->startDecaying();
-					item->setLoadedFromMap(true);
 				}
+			} else if (item->isGroundTile()) {
+				delete ground_item;
+				ground_item = item;
+			} else {
+				tile = createTile(ground_item, item, x, y, z);
+				tile->internalAddThing(item);
+				item->startDecaying();
 			}
 		}
 
@@ -395,8 +356,9 @@ bool IOMap::parseTileArea(OTB::Loader& loader, const OTB::Node& tileAreaNode, Ma
 		}
 
 		tile->setFlag(static_cast<tileflags_t>(tileflags));
+		tile->makeRefreshItemList();
 
-		map.setTile(x, y, z, tile);
+		map.setTile(x, y, z, tile, replaceExistingTiles);
 	}
 	return true;
 }

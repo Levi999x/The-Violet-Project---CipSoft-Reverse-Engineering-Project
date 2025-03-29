@@ -1,24 +1,7 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_ITEMS_H_4E2221634ABA45FE85BA50F710669B3C
-#define FS_ITEMS_H_4E2221634ABA45FE85BA50F710669B3C
+#pragma once
 
 #include "const.h"
 #include "enums.h"
@@ -72,6 +55,7 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_MOVEABLE,
 	ITEM_PARSE_BLOCKPROJECTILE,
 	ITEM_PARSE_PICKUPABLE,
+	ITEM_PARSE_UNLAY,
 	ITEM_PARSE_FORCESERIALIZE,
 	ITEM_PARSE_FLOORCHANGE,
 	ITEM_PARSE_CORPSETYPE,
@@ -97,7 +81,6 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_SHOWCHARGES,
 	ITEM_PARSE_SHOWATTRIBUTES,
 	ITEM_PARSE_HITCHANCE,
-	ITEM_PARSE_MAXHITCHANCE,
 	ITEM_PARSE_INVISIBLE,
 	ITEM_PARSE_SPEED,
 	ITEM_PARSE_HEALTHGAIN,
@@ -133,12 +116,8 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_ABSORBPERCENTENERGY,
 	ITEM_PARSE_ABSORBPERCENTFIRE,
 	ITEM_PARSE_ABSORBPERCENTPOISON,
-	ITEM_PARSE_ABSORBPERCENTICE,
-	ITEM_PARSE_ABSORBPERCENTHOLY,
-	ITEM_PARSE_ABSORBPERCENTDEATH,
 	ITEM_PARSE_ABSORBPERCENTLIFEDRAIN,
 	ITEM_PARSE_ABSORBPERCENTMANADRAIN,
-	ITEM_PARSE_ABSORBPERCENTDROWN,
 	ITEM_PARSE_ABSORBPERCENTPHYSICAL,
 	ITEM_PARSE_ABSORBPERCENTHEALING,
 	ITEM_PARSE_ABSORBPERCENTUNDEFINED,
@@ -146,11 +125,7 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_SUPPRESSENERGY,
 	ITEM_PARSE_SUPPRESSFIRE,
 	ITEM_PARSE_SUPPRESSPOISON,
-	ITEM_PARSE_SUPPRESSDROWN,
 	ITEM_PARSE_SUPPRESSPHYSICAL,
-	ITEM_PARSE_SUPPRESSFREEZE,
-	ITEM_PARSE_SUPPRESSDAZZLE,
-	ITEM_PARSE_SUPPRESSCURSE,
 	ITEM_PARSE_FIELD,
 	ITEM_PARSE_REPLACEABLE,
 	ITEM_PARSE_PARTNERDIRECTION,
@@ -159,17 +134,16 @@ enum ItemParseAttributes_t {
 	ITEM_PARSE_FEMALETRANSFORMTO,
 	ITEM_PARSE_TRANSFORMTO,
 	ITEM_PARSE_DESTROYTO,
-	ITEM_PARSE_ELEMENTICE,
 	ITEM_PARSE_ELEMENTEARTH,
 	ITEM_PARSE_ELEMENTFIRE,
 	ITEM_PARSE_ELEMENTENERGY,
-	ITEM_PARSE_ELEMENTDEATH,
-	ITEM_PARSE_ELEMENTHOLY,
-	ITEM_PARSE_WALKSTACK,
 	ITEM_PARSE_BLOCKING,
 	ITEM_PARSE_ALLOWDISTREAD,
-	ITEM_PARSE_STOREITEM,
-	ITEM_PARSE_WORTH,
+	ITEM_PARSE_FORCEUSE,
+	ITEM_PARSE_POISONDAMAGECYCLES,
+	ITEM_PARSE_REPLACEMAGICFIELDS,
+	ITEM_PARSE_BLOCKPATHFIND,
+	ITEM_PARSE_SPECIALFIELDBLOCKPATH,
 };
 
 struct Abilities {
@@ -261,13 +235,13 @@ class ItemType
 			return (type == ITEM_TYPE_RUNE);
 		}
 		bool isPickupable() const {
-			return (allowPickupable || pickupable);
+			return pickupable;
 		}
 		bool isUseable() const {
 			return (useable);
 		}
 		bool hasSubType() const {
-			return (isFluidContainer() || isSplash() || stackable || charges != 0);
+			return (isFluidContainer() || isSplash() || stackable || charges != 0 || isRune());
 		}
 
 		Abilities& getAbilities() {
@@ -322,7 +296,6 @@ class ItemType
 		uint32_t minReqLevel = 0;
 		uint32_t minReqMagicLevel = 0;
 		uint32_t charges = 0;
-		int32_t maxHitChance = -1;
 		int32_t decayTo = -1;
 		int32_t attack = 0;
 		int32_t defense = 0;
@@ -331,7 +304,6 @@ class ItemType
 		uint16_t rotateTo = 0;
 		int32_t runeMagLevel = 0;
 		int32_t runeLevel = 0;
-		uint64_t worth = 0;
 
 		CombatType_t combatType = COMBAT_NONE;
 
@@ -343,7 +315,7 @@ class ItemType
 		uint16_t transformEquipTo = 0;
 		uint16_t transformDeEquipTo = 0;
 		uint16_t maxItems = 8;
-		uint16_t slotPosition = SLOTP_HAND;
+		uint16_t slotPosition = SLOTP_RIGHT | SLOTP_LEFT | SLOTP_AMMO;
 		uint16_t speed = 0;
 		uint16_t wareId = 0;
 
@@ -362,11 +334,11 @@ class ItemType
 		uint8_t shootRange = 1;
 		int8_t hitChance = 0;
 
-		bool storeItem = false;
+		bool specialFieldBlockPath = false;
+		bool replaceMagicFields = false;
 		bool forceUse = false;
 		bool forceSerialize = false;
 		bool hasHeight = false;
-		bool walkStack = true;
 		bool blockSolid = false;
 		bool blockPickupable = false;
 		bool blockProjectile = false;
@@ -395,10 +367,8 @@ class ItemType
 class Items
 {
 	public:
-		using NameMap = std::unordered_map<std::string, uint16_t>;
+		using NameMap = std::unordered_multimap<std::string, uint16_t>;
 		using InventoryVector = std::vector<uint16_t>;
-
-		using CurrencyMap = std::map<uint64_t, uint16_t, std::greater<uint64_t>>;
 
 		Items();
 
@@ -437,7 +407,6 @@ class Items
 		}
 
 		NameMap nameToItems;
-		CurrencyMap currencyItems;
 
 	private:
 		std::vector<ItemType> items;
@@ -473,4 +442,3 @@ class Items
 				std::vector<uint16_t> vec;
 		} clientIdToServerIdMap;
 };
-#endif

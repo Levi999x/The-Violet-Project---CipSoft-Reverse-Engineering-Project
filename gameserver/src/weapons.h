@@ -1,24 +1,7 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_WEAPONS_H_69D1993478AA42948E24C0B90B8F5BF5
-#define FS_WEAPONS_H_69D1993478AA42948E24C0B90B8F5BF5
+#pragma once
 
 #include "luascript.h"
 #include "player.h"
@@ -200,7 +183,7 @@ class Weapon : public Event
 
 	protected:
 		void internalUseWeapon(Player* player, Item* item, Creature* target, int32_t damageModifier) const;
-		void internalUseWeapon(Player* player, Item* item, Tile* tile) const;
+		void internalUseWeapon(Player* player, Item* item, Tile* tile, bool hit = true) const;
 
 		uint16_t id = 0;
 
@@ -228,7 +211,7 @@ class Weapon : public Event
 
 		std::string getScriptEventName() const override final;
 
-		bool executeUseWeapon(Player* player, const LuaVariant& var) const;
+		bool executeUseWeapon(Player* player, const LuaVariant& var, bool hit = true) const;
 		void onUsedWeapon(Player* player, Item* item, Tile* destTile) const;
 
 		static void decrementItemCount(Item* item);
@@ -307,5 +290,3 @@ class WeaponWand final : public Weapon
 		int32_t minChange = 0;
 		int32_t maxChange = 0;
 };
-
-#endif

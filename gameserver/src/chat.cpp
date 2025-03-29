@@ -1,21 +1,5 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
@@ -52,10 +36,6 @@ void PrivateChatChannel::invitePlayer(const Player& player, Player& invitePlayer
 	invitePlayer.sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("{:s} invites you to {:s} private chat channel.", player.getName(), player.getSex() == PLAYERSEX_FEMALE ? "her" : "his"));
 
 	player.sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("{:s} has been invited.", invitePlayer.getName()));
-
-	/*for (const auto& it : users) {
-		it.second->sendChannelEvent(id, invitePlayer.getName(), CHANNELEVENT_INVITE);
-	}*/
 }
 
 void PrivateChatChannel::excludePlayer(const Player& player, Player& excludePlayer)
@@ -69,10 +49,6 @@ void PrivateChatChannel::excludePlayer(const Player& player, Player& excludePlay
 	player.sendTextMessage(MESSAGE_INFO_DESCR, fmt::format("{:s} has been excluded.", excludePlayer.getName()));
 
 	excludePlayer.sendClosePrivate(id);
-
-	/*for (const auto& it : users) {
-		it.second->sendChannelEvent(id, excludePlayer.getName(), CHANNELEVENT_EXCLUDE);
-	}*/
 }
 
 void PrivateChatChannel::closeChannel() const
@@ -100,12 +76,6 @@ bool ChatChannel::addUser(Player& player)
 		}
 	}
 
-	/*if (!publicChannel) {
-		for (const auto& it : users) {
-			it.second->sendChannelEvent(id, player.getName(), CHANNELEVENT_JOIN);
-		}
-	}*/
-
 	users[player.getID()] = &player;
 	return true;
 }
@@ -118,12 +88,6 @@ bool ChatChannel::removeUser(const Player& player)
 	}
 
 	users.erase(iter);
-
-	/*if (!publicChannel) {
-		for (const auto& it : users) {
-			it.second->sendChannelEvent(id, player.getName(), CHANNELEVENT_LEAVE);
-		}
-	}*/
 
 	executeOnLeaveEvent(player);
 	return true;
@@ -495,9 +459,7 @@ bool Chat::talkToChannel(const Player& player, SpeakClasses type, const std::str
 
 	if (channelId == CHANNEL_GUILD) {
 		GuildRank_ptr rank = player.getGuildRank();
-		if (rank && rank->level > 1) {
-			type = TALKTYPE_CHANNEL_O;
-		} else if (type != TALKTYPE_CHANNEL_Y) {
+		if (type != TALKTYPE_CHANNEL_Y) {
 			type = TALKTYPE_CHANNEL_Y;
 		}
 	} else if (channelId == CHANNEL_PRIVATE || channelId == CHANNEL_PARTY) {

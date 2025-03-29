@@ -1,21 +1,5 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
@@ -42,18 +26,15 @@ void XTEA_encrypt(OutputMessage& msg, const xtea::round_keys& key)
 
 bool XTEA_decrypt(NetworkMessage& msg, const xtea::round_keys& key)
 {
-	if (((msg.getLength() - 2) & 7) != 0) {
-	//if (((msg.getLength() - 6) & 7) != 0) {
+	if (((msg.getLength() - 2) % 8) != 0) {
 		return false;
 	}
 
 	uint8_t* buffer = msg.getBuffer() + msg.getBufferPosition();
-	//xtea::decrypt(buffer, msg.getLength() - 6, key);
-	xtea::decrypt(buffer, msg.getLength() - 2, key);
+	xtea::decrypt(buffer, msg.getLength() - 4, key);
 
 	uint16_t innerLength = msg.get<uint16_t>();
-	//if (innerLength + 8 > msg.getLength()) {
-	if (innerLength > msg.getLength() - 4) {
+	if (innerLength + 4 > msg.getLength()) {
 		return false;
 	}
 
@@ -70,7 +51,7 @@ void Protocol::onSendMessage(const OutputMessage_ptr& msg) const
 
 		if (encryptionEnabled) {
 			XTEA_encrypt(*msg, key);
-			msg->addCryptoHeader(checksumEnabled);
+			msg->addCryptoHeader();
 		}
 	}
 }

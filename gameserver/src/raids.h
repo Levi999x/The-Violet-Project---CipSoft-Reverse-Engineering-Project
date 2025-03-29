@@ -1,47 +1,29 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_RAIDS_H_3583C7C054584881856D55765DEDAFA9
-#define FS_RAIDS_H_3583C7C054584881856D55765DEDAFA9
+#pragma once
 
 #include "const.h"
 #include "position.h"
 #include "baseevents.h"
-
-enum RaidState_t {
-	RAIDSTATE_IDLE,
-	RAIDSTATE_EXECUTING,
-};
+#include "monsters.h"
 
 struct MonsterSpawn {
-	MonsterSpawn(std::string name, uint32_t minAmount, uint32_t maxAmount) :
-		name(std::move(name)), minAmount(minAmount), maxAmount(maxAmount) {}
+	MonsterSpawn(std::string name, uint32_t minAmount, uint32_t maxAmount, uint32_t spread, uint64_t lifetime) :
+	    name(std::move(name)), minAmount(minAmount), maxAmount(maxAmount), spread(spread), lifetime(lifetime)
+	{}
 
+	std::vector<LootBlock> extraLoot;
 	std::string name;
 	uint32_t minAmount;
 	uint32_t maxAmount;
+	uint32_t spread;
+	uint64_t lifetime;
 };
 
 //How many times it will try to find a tile to add the monster to before giving up
 static constexpr int32_t MAXIMUM_TRIES_PER_MONSTER = 10;
-static constexpr int32_t CHECK_RAIDS_INTERVAL = 60;
-static constexpr int32_t RAID_MINTICKS = 1000;
+static constexpr int32_t CHECK_RAIDS_INTERVAL = 10 * 1000;
 
 class Raid;
 class RaidEvent;
@@ -78,13 +60,6 @@ class Raids
 
 		Raid* getRaidByName(const std::string& name);
 
-		uint64_t getLastRaidEnd() const {
-			return lastRaidEnd;
-		}
-		void setLastRaidEnd(uint64_t newLastRaidEnd) {
-			lastRaidEnd = newLastRaidEnd;
-		}
-
 		void checkRaids();
 
 		LuaScriptInterface& getScriptInterface() {
@@ -96,7 +71,6 @@ class Raids
 
 		std::list<Raid*> raidList;
 		Raid* running = nullptr;
-		uint64_t lastRaidEnd = 0;
 		uint32_t checkRaidsEvent = 0;
 		bool loaded = false;
 		bool started = false;
@@ -105,8 +79,8 @@ class Raids
 class Raid
 {
 	public:
-		Raid(std::string name, uint32_t interval, uint32_t marginTime, bool repeat) :
-			name(std::move(name)), interval(interval), margin(marginTime), repeat(repeat) {}
+		Raid(std::string name, uint32_t interval) :
+			name(std::move(name)), interval(interval) {}
 		~Raid();
 
 		// non-copyable
@@ -121,9 +95,7 @@ class Raid
 		void resetRaid();
 
 		RaidEvent* getNextRaidEvent();
-		void setState(RaidState_t newState) {
-			state = newState;
-		}
+
 		const std::string& getName() const {
 			return name;
 		}
@@ -131,14 +103,29 @@ class Raid
 		bool isLoaded() const {
 			return loaded;
 		}
-		uint64_t getMargin() const {
-			return margin;
-		}
 		uint32_t getInterval() const {
 			return interval;
 		}
-		bool canBeRepeated() const {
-			return repeat;
+
+		const time_t& getDateTime() const { 
+			return datetime;
+		}
+	    void setDateTime(time_t time) { 
+			datetime = time;
+		}
+
+		void setLogged(bool v) { 
+			log = v;
+		}
+		bool isLogged() const { 
+			return log;
+		}
+
+		void setExecuted() { 
+			executed = true;
+		}
+		bool hasExecuted() const { 
+			return executed;
 		}
 
 		void stopEvents();
@@ -146,13 +133,13 @@ class Raid
 	private:
 		std::vector<RaidEvent*> raidEvents;
 		std::string name;
+	    time_t datetime = 0;
 		uint32_t interval;
 		uint32_t nextEvent = 0;
-		uint64_t margin;
-		RaidState_t state = RAIDSTATE_IDLE;
 		uint32_t nextEventEvent = 0;
 		bool loaded = false;
-		bool repeat;
+	    bool executed = false;
+	    bool log = false;
 };
 
 class RaidEvent
@@ -193,6 +180,7 @@ class SingleSpawnEvent final : public RaidEvent
 		bool executeEvent() override;
 
 	private:
+		std::vector<LootBlock> extraLoot;
 		std::string monsterName;
 		Position position;
 };
@@ -224,5 +212,3 @@ class ScriptEvent final : public RaidEvent, public Event
 	private:
 		std::string getScriptEventName() const override;
 };
-
-#endif

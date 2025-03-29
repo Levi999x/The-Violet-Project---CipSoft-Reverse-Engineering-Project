@@ -1,24 +1,7 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_BED_H_84DE19758D424C6C9789189231946BFF
-#define FS_BED_H_84DE19758D424C6C9789189231946BFF
+#pragma once
 
 #include "item.h"
 
@@ -28,7 +11,7 @@ class Player;
 class BedItem final : public Item
 {
 	public:
-		explicit BedItem(uint16_t id);
+		explicit BedItem(uint16_t id) : Item(id) {}
 
 		BedItem* getBed() override {
 			return this;
@@ -39,10 +22,6 @@ class BedItem final : public Item
 
 		Attr_ReadValue readAttr(AttrTypes_t attr, PropStream& propStream) override;
 		void serializeAttr(PropWriteStream& propWriteStream) const override;
-
-		bool canRemove() const override {
-			return house == nullptr;
-		}
 
 		uint32_t getSleeper() const {
 			return sleeperGUID;
@@ -63,15 +42,15 @@ class BedItem final : public Item
 
 		BedItem* getNextBedItem() const;
 
-	private:
+	protected:
 		void updateAppearance(const Player* player);
 		void regeneratePlayer(Player* player) const;
 		void internalSetSleeper(const Player* player);
 		void internalRemoveSleeper();
 
 		House* house = nullptr;
-		uint64_t sleepStart;
-		uint32_t sleeperGUID;
-};
+		uint64_t sleepStart = 0;
+		uint32_t sleeperGUID = 0;
 
-#endif
+		friend class Item;
+};

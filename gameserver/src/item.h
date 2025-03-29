@@ -1,31 +1,14 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_ITEM_H_009A319FB13D477D9EEFFBBD9BB83562
-#define FS_ITEM_H_009A319FB13D477D9EEFFBBD9BB83562
+#pragma once
 
 #include "cylinder.h"
 #include "thing.h"
 #include "items.h"
 #include "luascript.h"
 #include "tools.h"
-#include <typeinfo>
+#include "scriptreader.h"
 
 #include <boost/variant.hpp>
 #include <deque>
@@ -54,6 +37,7 @@ enum ITEMPROPERTY {
 	CONST_PROP_IMMOVABLENOFIELDBLOCKPATH,
 	CONST_PROP_NOFIELDBLOCKPATH,
 	CONST_PROP_SUPPORTHANGABLE,
+	CONST_PROP_SPECIALFIELDBLOCKPATH,
 };
 
 enum TradeEvents_t {
@@ -90,22 +74,27 @@ enum AttrTypes_t {
 	ATTR_SLEEPERGUID = 20,
 	ATTR_SLEEPSTART = 21,
 	ATTR_CHARGES = 22,
-	ATTR_CONTAINER_ITEMS = 23,
-	ATTR_NAME = 24,
-	ATTR_ARTICLE = 25,
-	ATTR_PLURALNAME = 26,
-	ATTR_WEIGHT = 27,
-	ATTR_ATTACK = 28,
-	ATTR_DEFENSE = 29,
-	ATTR_EXTRADEFENSE = 30,
-	ATTR_ARMOR = 31,
-	ATTR_HITCHANCE = 32,
-	ATTR_SHOOTRANGE = 33,
-	ATTR_CUSTOM_ATTRIBUTES = 34,
-	ATTR_DECAYTO = 35,
-	ATTR_WRAPID = 36,
-	ATTR_STOREITEM = 37,
-	ATTR_ATTACK_SPEED = 38,
+
+	ATTR_KEYNUMBER = 23,
+	ATTR_KEYHOLENUMBER = 24,
+	ATTR_DOORQUESTNUMBER = 25,
+	ATTR_DOORQUESTVALUE = 26,
+	ATTR_DOORLEVEL = 27,
+
+	ATTR_CONTAINER_ITEMS = 28,
+	ATTR_NAME = 29,
+	ATTR_ARTICLE = 30,
+	ATTR_PLURALNAME = 31,
+	ATTR_WEIGHT = 32,
+	ATTR_ATTACK = 33,
+	ATTR_DEFENSE = 34,
+	ATTR_EXTRADEFENSE = 35,
+	ATTR_ARMOR = 36,
+	ATTR_HITCHANCE = 37,
+	ATTR_SHOOTRANGE = 38,
+	ATTR_CUSTOM_ATTRIBUTES = 39,
+	ATTR_DECAYTO = 40,
+	ATTR_ATTACK_SPEED = 41,
 };
 
 enum Attr_ReadValue {
@@ -502,8 +491,9 @@ class ItemAttributes
 			| ITEM_ATTRIBUTE_WEIGHT | ITEM_ATTRIBUTE_ATTACK | ITEM_ATTRIBUTE_DEFENSE | ITEM_ATTRIBUTE_EXTRADEFENSE
 			| ITEM_ATTRIBUTE_ARMOR | ITEM_ATTRIBUTE_HITCHANCE | ITEM_ATTRIBUTE_SHOOTRANGE | ITEM_ATTRIBUTE_OWNER
 			| ITEM_ATTRIBUTE_DURATION | ITEM_ATTRIBUTE_DECAYSTATE | ITEM_ATTRIBUTE_CORPSEOWNER | ITEM_ATTRIBUTE_CHARGES
-			| ITEM_ATTRIBUTE_FLUIDTYPE | ITEM_ATTRIBUTE_DOORID | ITEM_ATTRIBUTE_DECAYTO | ITEM_ATTRIBUTE_WRAPID | ITEM_ATTRIBUTE_STOREITEM
-			| ITEM_ATTRIBUTE_ATTACK_SPEED;
+			| ITEM_ATTRIBUTE_FLUIDTYPE | ITEM_ATTRIBUTE_DOORID | ITEM_ATTRIBUTE_DECAYTO
+			| ITEM_ATTRIBUTE_ATTACK_SPEED | ITEM_ATTRIBUTE_KEYNUMBER | ITEM_ATTRIBUTE_KEYHOLENUMBER | ITEM_ATTRIBUTE_DOORLEVEL
+			| ITEM_ATTRIBUTE_DOORQUESTNUMBER | ITEM_ATTRIBUTE_DOORQUESTVALUE;
 		const static uint32_t stringAttributeTypes = ITEM_ATTRIBUTE_DESCRIPTION | ITEM_ATTRIBUTE_TEXT | ITEM_ATTRIBUTE_WRITER
 			| ITEM_ATTRIBUTE_NAME | ITEM_ATTRIBUTE_ARTICLE | ITEM_ATTRIBUTE_PLURALNAME;
 
@@ -532,6 +522,7 @@ class Item : virtual public Thing
 		static Item* CreateItem(const uint16_t type, uint16_t count = 0);
 		static Container* CreateItemAsContainer(const uint16_t type, uint16_t size);
 		static Item* CreateItem(PropStream& propStream);
+		static Item* CreateItem(ScriptReader& scriptReader);
 		static Items items;
 
 		// Constructor for items
@@ -719,6 +710,16 @@ class Item : virtual public Thing
 			return static_cast<uint16_t>(getIntAttr(ITEM_ATTRIBUTE_UNIQUEID));
 		}
 
+		void setDoorLevel(uint16_t n) {
+			setIntAttr(ITEM_ATTRIBUTE_DOORLEVEL, n);
+		}
+		uint16_t getDoorLevel() const {
+			if (!attributes) {
+				return 0;
+			}
+			return static_cast<uint16_t>(getIntAttr(ITEM_ATTRIBUTE_DOORLEVEL));
+		}
+
 		void setCharges(uint16_t n) {
 			setIntAttr(ITEM_ATTRIBUTE_CHARGES, n);
 		}
@@ -792,6 +793,16 @@ class Item : virtual public Thing
 			return items[id].decayTo;
 		}
 
+		void setKeyNumber(uint16_t n) {
+			setIntAttr(ITEM_ATTRIBUTE_KEYNUMBER, n);
+		}
+		uint16_t getKeyNumber() const {
+			if (!attributes) {
+				return 0;
+			}
+			return static_cast<uint16_t>(getIntAttr(ITEM_ATTRIBUTE_KEYNUMBER));
+		}
+
 		static std::string getDescription(const ItemType& it, int32_t lookDistance, const Item* item = nullptr, int32_t subType = -1, bool addArticle = true);
 		static std::string getNameDescription(const ItemType& it, const Item* item = nullptr, int32_t subType = -1, bool addArticle = true);
 		static std::string getWeightDescription(const ItemType& it, uint32_t weight, uint32_t count = 1);
@@ -803,15 +814,17 @@ class Item : virtual public Thing
 		//serialization
 		virtual Attr_ReadValue readAttr(AttrTypes_t attr, PropStream& propStream);
 		bool unserializeAttr(PropStream& propStream);
+		bool unserializeTVPFormat(PropStream& propStream);
 		virtual bool unserializeItemNode(OTB::Loader&, const OTB::Node&, PropStream& propStream);
 
 		virtual void serializeAttr(PropWriteStream& propWriteStream) const;
+		virtual void serializeTVPFormat(PropWriteStream& propWriteStream) const;
 
 		bool isPushable() const override final {
 			return isMoveable();
 		}
 		int32_t getThrowRange() const override final {
-			return (isPickupable() ? 15 : 2);
+			return (isPickupable() ? std::numeric_limits<uint8_t>::max() : 2); // there is actually no limit in 7.7 for takable objects
 		}
 
 		uint16_t getID() const {
@@ -920,19 +933,11 @@ class Item : virtual public Thing
 			const ItemType& it = items[id];
 			return it.rotatable && it.rotateTo;
 		}
-		bool hasWalkStack() const {
-			return items[id].walkStack;
+		bool isRune() const {
+			const ItemType& it = items[id];
+			return it.isRune();
 		}
 
-		void setStoreItem(bool storeItem) {
-			setIntAttr(ITEM_ATTRIBUTE_STOREITEM, static_cast<int64_t>(storeItem));
-		}
-		bool isStoreItem() const {
-			if (hasAttribute(ITEM_ATTRIBUTE_STOREITEM)) {
-				return getIntAttr(ITEM_ATTRIBUTE_STOREITEM) == 1;
-			}
-			return items[id].storeItem;
-		}
 		const std::string& getName() const {
 			if (hasAttribute(ITEM_ATTRIBUTE_NAME)) {
 				return getStrAttr(ITEM_ATTRIBUTE_NAME);
@@ -985,9 +990,6 @@ class Item : virtual public Thing
 		}
 		bool canDecay() const;
 
-		virtual bool canRemove() const {
-			return true;
-		}
 		virtual bool canTransform() const {
 			return true;
 		}
@@ -996,17 +998,7 @@ class Item : virtual public Thing
 
 		virtual void startDecaying();
 
-		bool isLoadedFromMap() const {
-			return loadedFromMap;
-		}
-		void setLoadedFromMap(bool value) {
-			loadedFromMap = value;
-		}
-		bool isCleanable() const {
-			return !loadedFromMap && canRemove() && isPickupable() && !hasAttribute(ITEM_ATTRIBUTE_UNIQUEID) && !hasAttribute(ITEM_ATTRIBUTE_ACTIONID);
-		}
-
-		bool hasMarketAttributes() const;
+		bool isHouseItem() const;
 
 		std::unique_ptr<ItemAttributes>& getAttributes() {
 			if (!attributes) {
@@ -1018,11 +1010,7 @@ class Item : virtual public Thing
 		void incrementReferenceCounter() {
 			++referenceCounter;
 		}
-		void decrementReferenceCounter() {
-			if (--referenceCounter == 0) {
-				delete this;
-			}
-		}
+		void decrementReferenceCounter();
 
 		Cylinder* getParent() const override {
 			return parent;
@@ -1030,6 +1018,7 @@ class Item : virtual public Thing
 		void setParent(Cylinder* cylinder) override {
 			parent = cylinder;
 		}
+		std::pair<bool, bool> isInsideDepotLocker() const;
 		Cylinder* getTopParent();
 		const Cylinder* getTopParent() const;
 		Tile* getTile() override;
@@ -1037,10 +1026,6 @@ class Item : virtual public Thing
 		bool isRemoved() const override {
 			return !parent || parent->isRemoved();
 		}
-
-        static void setMapVersion(uint32_t n) {
-            mapVersion = n;
-        }
 
 	protected:
 		Cylinder* parent = nullptr;
@@ -1056,14 +1041,8 @@ class Item : virtual public Thing
 
 		uint8_t count = 1; // number of stacked items
 
-		bool loadedFromMap = false;
-
-        static uint32_t mapVersion;
-
 		//Don't add variables here, use the ItemAttribute class.
 };
 
 using ItemList = std::list<Item*>;
 using ItemDeque = std::deque<Item*>;
-
-#endif

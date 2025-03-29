@@ -1,21 +1,5 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
@@ -24,6 +8,8 @@
 #include "game.h"
 
 #include <fmt/format.h>
+#include <fstream>
+#include <filesystem>
 
 extern ConfigManager g_config;
 extern Game g_game;
@@ -32,52 +18,22 @@ Account IOLoginData::loadAccount(uint32_t accno)
 {
 	Account account;
 
-	DBResult_ptr result = Database::getInstance().storeQuery(fmt::format("SELECT `id`, `name`, `password`, `type`, `premium_ends_at` FROM `accounts` WHERE `id` = {:d}", accno));
+	DBResult_ptr result = Database::getInstance().storeQuery(fmt::format("SELECT `id`, `password`, `type`, `premium_ends_at` FROM `accounts` WHERE `id` = {:d}", accno));
 	if (!result) {
 		return account;
 	}
 
 	account.id = result->getNumber<uint32_t>("id");
-	account.name = result->getString("name");
 	account.accountType = static_cast<AccountType_t>(result->getNumber<int32_t>("type"));
 	account.premiumEndsAt = result->getNumber<time_t>("premium_ends_at");
 	return account;
 }
 
-std::string decodeSecret(const std::string& secret)
-{
-	// simple base32 decoding
-	std::string key;
-	key.reserve(10);
-
-	uint32_t buffer = 0, left = 0;
-	for (const auto& ch : secret) {
-		buffer <<= 5;
-		if (ch >= 'A' && ch <= 'Z') {
-			buffer |= (ch & 0x1F) - 1;
-		} else if (ch >= '2' && ch <= '7') {
-			buffer |= ch - 24;
-		} else {
-			// if a key is broken, return empty and the comparison
-			// will always be false since the token must not be empty
-			return {};
-		}
-
-		left += 5;
-		if (left >= 8) {
-			left -= 8;
-			key.push_back(static_cast<char>(buffer >> left));
-		}
-	}
-
-	return key;
-}
-
-bool IOLoginData::loginserverAuthentication(const std::string& name, const std::string& password, Account& account)
+bool IOLoginData::loginserverAuthentication(uint32_t accountNumber, const std::string& password, Account& account)
 {
 	Database& db = Database::getInstance();
 
-	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `name`, `password`, `secret`, `type`, `premium_ends_at` FROM `accounts` WHERE `name` = {:s}", db.escapeString(name)));
+	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `password`, `type`, `premium_ends_at` FROM `accounts` WHERE `id` = {:d}", accountNumber));
 	if (!result) {
 		return false;
 	}
@@ -87,8 +43,6 @@ bool IOLoginData::loginserverAuthentication(const std::string& name, const std::
 	}
 
 	account.id = result->getNumber<uint32_t>("id");
-	account.name = result->getString("name");
-	account.key = decodeSecret(result->getString("secret"));
 	account.accountType = static_cast<AccountType_t>(result->getNumber<int32_t>("type"));
 	account.premiumEndsAt = result->getNumber<time_t>("premium_ends_at");
 
@@ -101,26 +55,14 @@ bool IOLoginData::loginserverAuthentication(const std::string& name, const std::
 	return true;
 }
 
-uint32_t IOLoginData::gameworldAuthentication(const std::string& accountName, const std::string& password, std::string& characterName, std::string&, uint32_t)
+uint32_t IOLoginData::gameworldAuthentication(uint32_t accountNumber, const std::string& password, std::string& characterName)
 {
 	Database& db = Database::getInstance();
 
-	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `password`, `secret` FROM `accounts` WHERE `name` = {:s}", db.escapeString(accountName)));
+	DBResult_ptr result = db.storeQuery(fmt::format("SELECT `id`, `password` FROM `accounts` WHERE `id` = {:d}", accountNumber));
 	if (!result) {
 		return 0;
 	}
-
-	/*std::string secret = decodeSecret(result->getString("secret"));
-	if (!secret.empty()) {
-		if (token.empty()) {
-			return 0;
-		}
-
-		bool tokenValid = token == generateToken(secret, tokenTime) || token == generateToken(secret, tokenTime - 1) || token == generateToken(secret, tokenTime + 1);
-		if (!tokenValid) {
-			return 0;
-		}
-	}*/
 
 	if (transformToSHA1(password) != result->getString("password")) {
 		return 0;
@@ -211,13 +153,13 @@ bool IOLoginData::preloadPlayer(Player* player, const std::string& name)
 bool IOLoginData::loadPlayerById(Player* player, uint32_t id)
 {
 	Database& db = Database::getInstance();
-	return loadPlayer(player, db.storeQuery(fmt::format("SELECT `id`, `name`, `account_id`, `group_id`, `sex`, `vocation`, `experience`, `level`, `maglevel`, `health`, `healthmax`, `blessings`, `mana`, `manamax`, `manaspent`, `soul`, `lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `lookaddons`, `posx`, `posy`, `posz`, `cap`, `lastlogin`, `lastlogout`, `lastip`, `conditions`, `skulltime`, `skull`, `town_id`, `balance`, `offlinetraining_time`, `offlinetraining_skill`, `stamina`, `skill_fist`, `skill_fist_tries`, `skill_club`, `skill_club_tries`, `skill_sword`, `skill_sword_tries`, `skill_axe`, `skill_axe_tries`, `skill_dist`, `skill_dist_tries`, `skill_shielding`, `skill_shielding_tries`, `skill_fishing`, `skill_fishing_tries`, `direction` FROM `players` WHERE `id` = {:d}", id)));
+	return loadPlayer(player, db.storeQuery(fmt::format("SELECT `id`, `name`, `account_id`, `group_id`, `sex`, `vocation`, `experience`, `level`, `maglevel`, `health`, `healthmax`, `blessings`, `mana`, `manamax`, `manaspent`, `soul`, `lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `posx`, `posy`, `posz`, `cap`, `lastlogin`, `lastlogout`, `lastip`, `conditions`, `skulltime`, `skull`, `town_id`, `balance`, `stamina`, `skill_fist`, `skill_fist_tries`, `skill_club`, `skill_club_tries`, `skill_sword`, `skill_sword_tries`, `skill_axe`, `skill_axe_tries`, `skill_dist`, `skill_dist_tries`, `skill_shielding`, `skill_shielding_tries`, `skill_fishing`, `skill_fishing_tries` FROM `players` WHERE `id` = {:d}", id)));
 }
 
 bool IOLoginData::loadPlayerByName(Player* player, const std::string& name)
 {
 	Database& db = Database::getInstance();
-	return loadPlayer(player, db.storeQuery(fmt::format("SELECT `id`, `name`, `account_id`, `group_id`, `sex`, `vocation`, `experience`, `level`, `maglevel`, `health`, `healthmax`, `blessings`, `mana`, `manamax`, `manaspent`, `soul`, `lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `lookaddons`, `posx`, `posy`, `posz`, `cap`, `lastlogin`, `lastlogout`, `lastip`, `conditions`, `skulltime`, `skull`, `town_id`, `balance`, `offlinetraining_time`, `offlinetraining_skill`, `stamina`, `skill_fist`, `skill_fist_tries`, `skill_club`, `skill_club_tries`, `skill_sword`, `skill_sword_tries`, `skill_axe`, `skill_axe_tries`, `skill_dist`, `skill_dist_tries`, `skill_shielding`, `skill_shielding_tries`, `skill_fishing`, `skill_fishing_tries`, `direction` FROM `players` WHERE `name` = {:s}", db.escapeString(name))));
+	return loadPlayer(player, db.storeQuery(fmt::format("SELECT `id`, `name`, `account_id`, `group_id`, `sex`, `vocation`, `experience`, `level`, `maglevel`, `health`, `healthmax`, `blessings`, `mana`, `manamax`, `manaspent`, `soul`, `lookbody`, `lookfeet`, `lookhead`, `looklegs`, `looktype`, `posx`, `posy`, `posz`, `cap`, `lastlogin`, `lastlogout`, `lastip`, `conditions`, `skulltime`, `skull`, `town_id`, `balance`, `stamina`, `skill_fist`, `skill_fist_tries`, `skill_club`, `skill_club_tries`, `skill_sword`, `skill_sword_tries`, `skill_axe`, `skill_axe_tries`, `skill_dist`, `skill_dist_tries`, `skill_shielding`, `skill_shielding_tries`, `skill_fishing`, `skill_fishing_tries` FROM `players` WHERE `name` = {:s}", db.escapeString(name))));
 }
 
 bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
@@ -278,7 +220,7 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 
 	Condition* condition = Condition::createCondition(propStream);
 	while (condition) {
-		if (condition->unserialize(propStream)) {
+		if (condition->getType() != CONDITION_INFIGHT && condition->unserialize(propStream)) {
 			player->storedConditionList.push_front(condition);
 		} else {
 			delete condition;
@@ -312,22 +254,18 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 	player->defaultOutfit.lookBody = result->getNumber<uint16_t>("lookbody");
 	player->defaultOutfit.lookLegs = result->getNumber<uint16_t>("looklegs");
 	player->defaultOutfit.lookFeet = result->getNumber<uint16_t>("lookfeet");
-	player->defaultOutfit.lookAddons = result->getNumber<uint16_t>("lookaddons");
 	player->currentOutfit = player->defaultOutfit;
-	player->direction = static_cast<Direction> (result->getNumber<uint16_t>("direction"));
 
 	if (g_game.getWorldType() != WORLD_TYPE_PVP_ENFORCED) {
-		const time_t skullSeconds = result->getNumber<time_t>("skulltime") - time(nullptr);
-		if (skullSeconds > 0) {
-			//ensure that we round up the number of ticks
-			player->skullTicks = (skullSeconds + 2);
+		player->playerKillerEnd = result->getNumber<time_t>("skulltime");
 
-			uint16_t skull = result->getNumber<uint16_t>("skull");
-			if (skull == SKULL_RED) {
-				player->skull = SKULL_RED;
-			} else if (skull == SKULL_BLACK) {
-				player->skull = SKULL_BLACK;
-			}
+		uint16_t skull = result->getNumber<uint16_t>("skull");
+		if (skull == SKULL_RED) {
+			player->skull = SKULL_RED;
+		}
+
+		if (player->playerKillerEnd == 0) {
+			player->skull = SKULL_NONE;
 		}
 	}
 
@@ -337,9 +275,6 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 
 	player->lastLoginSaved = result->getNumber<time_t>("lastlogin");
 	player->lastLogout = result->getNumber<time_t>("lastlogout");
-
-	player->offlineTrainingTime = result->getNumber<int32_t>("offlinetraining_time") * 1000;
-	player->offlineTrainingSkill = result->getNumber<int32_t>("offlinetraining_skill");
 
 	Town* town = g_game.map.towns.getTown(result->getNumber<uint32_t>("town_id"));
 	if (!town) {
@@ -370,6 +305,12 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		player->skills[i].level = skillLevel;
 		player->skills[i].tries = skillTries;
 		player->skills[i].percent = Player::getPercentLevel(skillTries, nextSkillTries);
+	}
+
+	if ((result = db.storeQuery(fmt::format("SELECT `date` FROM `player_murders` WHERE `player_id` = {:d} ORDER BY `date` ASC", player->getGUID())))) {
+		do {
+			player->murderTimeStamps.push_back(result->getNumber<time_t>("date"));
+		} while (result->next());
 	}
 
 	if ((result = db.storeQuery(fmt::format("SELECT `guild_id`, `rank_id`, `nick` FROM `guild_membership` WHERE `player_id` = {:d}", player->getGUID())))) {
@@ -417,147 +358,146 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		} while (result->next());
 	}
 
-	//load inventory items
-	ItemMap itemMap;
+	//load inventory / depot items items
+	if (g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+		// Find the players sub folder by modulus of player GUID and load
+		uint32_t modulus = static_cast<uint32_t>(player->getGUID() % 100);
+		const std::string foldername = fmt::format("gamedata/players/{:d}", modulus);
+		const std::string filename = fmt::format("{}/{:d}.tvpi", foldername, player->getGUID());
 
-	if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_items` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
-		loadItems(itemMap, result);
+		std::ifstream fileTest(filename, std::ios::binary);
+		if (fileTest.is_open()) {
+			const auto& fileSize = std::filesystem::file_size(std::filesystem::path(filename));
 
-		for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
-			const std::pair<Item*, int32_t>& pair = it->second;
-			Item* item = pair.first;
-			int32_t pid = pair.second;
-			if (pid >= CONST_SLOT_FIRST && pid <= CONST_SLOT_LAST) {
-				player->internalAddThing(pid, item);
-			} else {
-				ItemMap::const_iterator it2 = itemMap.find(pid);
-				if (it2 == itemMap.end()) {
+			std::string content(fileSize, '\0');
+			fileTest.read(content.data(), fileSize);
+
+			propStream = {}; // reset propStream
+			propStream.init(content.data(), fileSize);
+
+			// if player inventory saves to database, nothing to load on file
+			for (int32_t i = player->getFirstIndex(); i < player->getLastIndex(); i++) {
+				uint16_t itemId = 0;
+				propStream.read<uint16_t>(itemId);
+
+				if (itemId == 0) {
+					// no inventory on this slot
 					continue;
 				}
 
-				Container* container = it2->second.first->getContainer();
-				if (container) {
-					container->internalAddThing(item);
+				Item* item = Item::CreateItem(itemId);
+				if (!item) {
+					std::cout << "ERROR - [IOLoginData::loadPlayer] Failed to create item " << itemId << " on file " << filename << std::endl;
+					return false;
+				}
+
+				if (!item->unserializeTVPFormat(propStream)) {
+					std::cout << "ERROR - [IOLoginData::loadPlayer] Failed to unserialize item " << itemId << " on file " << filename << std::endl;
+					return false;
+				}
+
+				player->internalAddThing(i, item);
+				item->startDecaying();
+			}
+
+			// after inventory slots, come depot slots
+
+			uint32_t totalDepots = 0;
+			propStream.read<uint32_t>(totalDepots);
+
+			for (uint32_t i = 0; i < totalDepots; i++) {
+				uint8_t depotId = 0;
+				propStream.read<uint8_t>(depotId);
+
+				DepotLocker* depotChest = player->getDepotLocker(depotId, true);
+				if (depotChest) {
+					uint32_t totalItems = 0;
+					propStream.read<uint32_t>(totalItems);
+
+					if (totalItems == 0) {
+						continue;
+					}
+
+					for (uint32_t ii = 0; ii < totalItems; ii++) {
+						Item* item = Item::CreateItem(propStream);
+						if (!item) {
+							std::cout << "ERROR - [IOLoginData::loadPlayer] Failed to create depot item (depotId:" << depotId << ") on file " << filename << std::endl;
+							return false;
+						}
+
+						if (!item->unserializeTVPFormat(propStream)) {
+							std::cout << "ERROR - [IOLoginData::loadPlayer] Failed to unserialize item " << item->getID() << " on file " << filename << std::endl;
+							return false;
+						}
+
+						depotChest->addItemBack(item);
+						item->startDecaying();
+					}
 				}
 			}
 		}
-	}
+	} 
 
-	//load depot locker items
-	itemMap.clear();
+	// If player data is enabled do not load from DB
+	// but if inventory is set to load from DB do so
+	if (!g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+		ItemMap itemMap;
 
-	if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_depotlockeritems` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
-		loadItems(itemMap, result);
+		if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_items` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
+			loadItems(itemMap, result);
 
-		for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
-			const std::pair<Item*, int32_t>& pair = it->second;
-			Item* item = pair.first;
+			for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
+				const std::pair<Item*, int32_t>& pair = it->second;
+				Item* item = pair.first;
+				int32_t pid = pair.second;
+				if (pid >= CONST_SLOT_FIRST && pid <= CONST_SLOT_LAST) {
+					player->internalAddThing(pid, item);
+				} else {
+					ItemMap::const_iterator it2 = itemMap.find(pid);
+					if (it2 == itemMap.end()) {
+						continue;
+					}
 
-			int32_t pid = pair.second;
-			if (pid >= 0 && pid < 100) {
-				DepotLocker* depotLocker = player->getDepotLocker(pid);
-				if (depotLocker) {
-					depotLocker->internalAddThing(item);
-				}
-			} else {
-				ItemMap::const_iterator it2 = itemMap.find(pid);
-				if (it2 == itemMap.end()) {
-					continue;
-				}
-
-				Container* container = it2->second.first->getContainer();
-				if (container) {
-					container->internalAddThing(item);
+					Container* container = it2->second.first->getContainer();
+					if (container) {
+						container->internalAddThing(item);
+					}
 				}
 			}
 		}
 	}
 
 	//load depot items
-	itemMap.clear();
+	if (!g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+		ItemMap itemMap;
 
-	if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_depotitems` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
-		loadItems(itemMap, result);
+		if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_depotitems` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
+			loadItems(itemMap, result);
 
-		for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
-			const std::pair<Item*, int32_t>& pair = it->second;
-			Item* item = pair.first;
+			for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
+				const std::pair<Item*, int32_t>& pair = it->second;
+				Item* item = pair.first;
 
-			int32_t pid = pair.second;
-			if (pid >= 0 && pid < 100) {
-				DepotChest* depotChest = player->getDepotChest(pid, true);
-				if (depotChest) {
-					depotChest->internalAddThing(item);
-				}
-			} else {
-				ItemMap::const_iterator it2 = itemMap.find(pid);
-				if (it2 == itemMap.end()) {
-					continue;
-				}
+				int32_t pid = pair.second;
+				if (pid >= 0 && pid < 100) {
+					DepotLocker* depotChest = player->getDepotLocker(pid, true);
+					if (depotChest) {
+						depotChest->internalAddThing(item);
+					}
+				} else {
+					ItemMap::const_iterator it2 = itemMap.find(pid);
+					if (it2 == itemMap.end()) {
+						continue;
+					}
 
-				Container* container = it2->second.first->getContainer();
-				if (container) {
-					container->internalAddThing(item);
-				}
-			}
-		}
-	}
-
-	//load inbox items
-	/*itemMap.clear();
-
-	if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_inboxitems` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
-		loadItems(itemMap, result);
-
-		for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
-			const std::pair<Item*, int32_t>& pair = it->second;
-			Item* item = pair.first;
-			int32_t pid = pair.second;
-
-			if (pid >= 0 && pid < 100) {
-				player->getInbox()->internalAddThing(item);
-			} else {
-				ItemMap::const_iterator it2 = itemMap.find(pid);
-
-				if (it2 == itemMap.end()) {
-					continue;
-				}
-
-				Container* container = it2->second.first->getContainer();
-				if (container) {
-					container->internalAddThing(item);
+					Container* container = it2->second.first->getContainer();
+					if (container) {
+						container->internalAddThing(item);
+					}
 				}
 			}
 		}
 	}
-
-	//load store inbox items
-	itemMap.clear();
-
-	if ((result = db.storeQuery(fmt::format("SELECT `pid`, `sid`, `itemtype`, `count`, `attributes` FROM `player_storeinboxitems` WHERE `player_id` = {:d} ORDER BY `sid` DESC", player->getGUID())))) {
-		loadItems(itemMap, result);
-
-		for (ItemMap::const_reverse_iterator it = itemMap.rbegin(), end = itemMap.rend(); it != end; ++it) {
-			const std::pair<Item*, int32_t>& pair = it->second;
-			Item* item = pair.first;
-			int32_t pid = pair.second;
-
-			if (pid >= 0 && pid < 100) {
-				player->getStoreInbox()->internalAddThing(item);
-			} else {
-				ItemMap::const_iterator it2 = itemMap.find(pid);
-
-				if (it2 == itemMap.end()) {
-					continue;
-				}
-
-				Container* container = it2->second.first->getContainer();
-				if (container) {
-					container->internalAddThing(item);
-				}
-			}
-		}
-	}*/
 
 	//load storage map
 	if ((result = db.storeQuery(fmt::format("SELECT `key`, `value` FROM `player_storage` WHERE `player_id` = {:d}", player->getGUID())))) {
@@ -575,15 +515,13 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 
 	player->updateBaseSpeed();
 	player->updateInventoryWeight();
-	player->updateItemsLight(true);
 	return true;
 }
 
 bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList, DBInsert& query_insert, PropWriteStream& propWriteStream)
 {
 	using ContainerBlock = std::pair<Container*, int32_t>;
-	std::vector<ContainerBlock> containers;
-	containers.reserve(32);
+	std::list<ContainerBlock> queue;
 
 	int32_t runningId = 100;
 
@@ -603,22 +541,27 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 			return false;
 		}
 
-		if (Container* container = item->getContainer()) {
-			containers.emplace_back(container, runningId);
+		// If are are using Player Data files, we only want the first 10 slots to be saved, not the contaents of all containers as well.
+		if (!g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+			if (Container* container = item->getContainer()) {
+				queue.emplace_back(container, runningId);
+			}
 		}
+
 	}
 
-	for (size_t i = 0; i < containers.size(); i++) {
-		const ContainerBlock& cb = containers[i];
+	while (!queue.empty()) {
+		const ContainerBlock& cb = queue.front();
 		Container* container = cb.first;
 		int32_t parentId = cb.second;
+		queue.pop_front();
 
 		for (Item* item : container->getItemList()) {
 			++runningId;
 
 			Container* subContainer = item->getContainer();
 			if (subContainer) {
-				containers.emplace_back(subContainer, runningId);
+				queue.emplace_back(subContainer, runningId);
 			}
 
 			propWriteStream.clear();
@@ -632,11 +575,10 @@ bool IOLoginData::saveItems(const Player* player, const ItemBlockList& itemList,
 			}
 		}
 	}
-
 	return query_insert.execute();
 }
 
-bool IOLoginData::savePlayer(Player* player)
+bool IOLoginData::savePlayer(Player* player, bool internalSave)
 {
 	if (player->getHealth() <= 0) {
 		player->changeHealth(1);
@@ -679,7 +621,6 @@ bool IOLoginData::savePlayer(Player* player)
 	query << "`lookhead` = " << static_cast<uint32_t>(player->defaultOutfit.lookHead) << ',';
 	query << "`looklegs` = " << static_cast<uint32_t>(player->defaultOutfit.lookLegs) << ',';
 	query << "`looktype` = " << player->defaultOutfit.lookType << ',';
-	query << "`lookaddons` = " << static_cast<uint32_t>(player->defaultOutfit.lookAddons) << ',';
 	query << "`maglevel` = " << player->magLevel << ',';
 	query << "`mana` = " << player->mana << ',';
 	query << "`manamax` = " << player->manaMax << ',';
@@ -703,29 +644,23 @@ bool IOLoginData::savePlayer(Player* player)
 		query << "`lastip` = " << player->lastIP << ',';
 	}
 
-	query << "`conditions` = " << db.escapeBlob(conditions, conditionsSize) << ',';
+	if (!internalSave) {
+		query << "`conditions` = " << db.escapeBlob(conditions, conditionsSize) << ',';
+	}
 
 	if (g_game.getWorldType() != WORLD_TYPE_PVP_ENFORCED) {
-		int64_t skullTime = 0;
-
-		if (player->skullTicks > 0) {
-			skullTime = time(nullptr) + player->skullTicks;
-		}
-		query << "`skulltime` = " << skullTime << ',';
+		query << "`skulltime` = " << player->playerKillerEnd << ',';
 
 		Skulls_t skull = SKULL_NONE;
 		if (player->skull == SKULL_RED) {
 			skull = SKULL_RED;
-		} else if (player->skull == SKULL_BLACK) {
-			skull = SKULL_BLACK;
 		}
-		query << "`skull` = " << static_cast<int64_t>(skull) << ',';
+
+		query << "`skull` = " << static_cast<uint32_t>(skull) << ',';
 	}
 
 	query << "`lastlogout` = " << player->getLastLogout() << ',';
 	query << "`balance` = " << player->bankBalance << ',';
-	query << "`offlinetraining_time` = " << player->getOfflineTrainingTime() / 1000 << ',';
-	query << "`offlinetraining_skill` = " << player->getOfflineTrainingSkill() << ',';
 	query << "`stamina` = " << player->getStaminaMinutes() << ',';
 
 	query << "`skill_fist` = " << player->skills[SKILL_FIST].level << ',';
@@ -742,7 +677,6 @@ bool IOLoginData::savePlayer(Player* player)
 	query << "`skill_shielding_tries` = " << player->skills[SKILL_SHIELD].tries << ',';
 	query << "`skill_fishing` = " << player->skills[SKILL_FISHING].level << ',';
 	query << "`skill_fishing_tries` = " << player->skills[SKILL_FISHING].tries << ',';
-	query << "`direction` = " << static_cast<uint16_t> (player->getDirection()) << ',';
 
 	if (!player->isOffline()) {
 		query << "`onlinetime` = `onlinetime` + " << (time(nullptr) - player->lastLoginSaved) << ',';
@@ -775,57 +709,107 @@ bool IOLoginData::savePlayer(Player* player)
 		return false;
 	}
 
+	// murder timestamps
+	if (!db.executeQuery(fmt::format("DELETE FROM `player_murders` WHERE `player_id` = {:d}", player->getGUID()))) {
+		return false;
+	}
+
+	query.str(std::string());
+	DBInsert murdersQuery("INSERT INTO `player_murders`(`player_id`, `date`) VALUES ");
+	for (time_t timestamp : player->murderTimeStamps) {
+		query << player->getGUID() << ',' << timestamp;
+		if (!murdersQuery.addRow(query)) {
+			return false;
+		}
+	}
+
+	if (!murdersQuery.execute()) {
+		return false;
+	}
+
 	//item saving
-	if (!db.executeQuery(fmt::format("DELETE FROM `player_items` WHERE `player_id` = {:d}", player->getGUID()))) {
-		return false;
-	}
+	if (g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+		//Create sub folders for player data from 0 to 99
+		uint32_t modulus = static_cast<uint32_t>(player->getGUID() % 100);
+		const std::string foldername = fmt::format("gamedata/players/{:d}", modulus);
+		const std::string filename = fmt::format("{}/{:d}.tvpi", foldername, player->getGUID());
 
-	DBInsert itemsQuery("INSERT INTO `player_items` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-
-	ItemBlockList itemList;
-	for (int32_t slotId = CONST_SLOT_FIRST; slotId <= CONST_SLOT_LAST; ++slotId) {
-		Item* item = player->inventory[slotId];
-		if (item) {
-			itemList.emplace_back(slotId, item);
+		//Create the required sub folder for us
+		if (!std::filesystem::exists(foldername) && !std::filesystem::create_directories(foldername)) {
+			std::cout << "> ERROR - [IOLoginData::savePlayer]: Cannot create " << foldername << "." << std::endl;
 		}
-	}
-
-	if (!saveItems(player, itemList, itemsQuery, propWriteStream)) {
-		return false;
-	}
-
-	//save depot locker items
-	bool needsSave = false;
-
-	for (const auto& it : player->depotLockerMap) {
-		if (it.second->needsSave()) {
-			needsSave = true;
-			break;
-		}
-	}
-
-	if (needsSave) {
-		if (!db.executeQuery(fmt::format("DELETE FROM `player_depotlockeritems` WHERE `player_id` = {:d}", player->getGUID()))) {
+		
+		std::ofstream file;
+		file.open(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+		if (!file.is_open()) {
+			std::cout << "> ERROR - [IOLoginData::savePlayer]: Cannot open " << filename << " for saving." << std::endl;
 			return false;
 		}
 
-		DBInsert lockerQuery("INSERT INTO `player_depotlockeritems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-		itemList.clear();
+		PropWriteStream f;
 
-		for (const auto& it : player->depotLockerMap) {
-			for (Item* item : it.second->getItemList()) {
-				if (item->getID() != ITEM_DEPOT) {
-					itemList.emplace_back(it.first, item);
+		for (int32_t slotId = player->getFirstIndex(); slotId < player->getLastIndex(); ++slotId) {
+			Item* item = player->inventory[slotId];
+			if (!item) {
+				f.write<uint16_t>(0); // no item on slot
+				continue;
+			}
+
+			item->serializeTVPFormat(f);
+		}
+
+		// then come total depots
+		const auto& depots = player->depotLockerMap;
+		f.write<uint32_t>(depots.size());
+
+		for (const auto& it : depots) {
+			f.write<uint8_t>(it.first); // depot ID
+			const auto& itemList = it.second->getItemList();
+			f.write<uint32_t>(itemList.size()); // total items
+
+			for (Item* item : itemList) {
+				if (item == nullptr) {
+					std::cout << "IOLoginData::savePlayer: " << player->getName() << " has an invalid item inside their depot (1)." << std::endl;
+					continue;
 				}
+
+				item->serializeTVPFormat(f);
 			}
 		}
 
-		if (!saveItems(player, itemList, lockerQuery, propWriteStream)) {
+		// save player TVPI file
+		size_t size;
+		const char* data = f.getStream(size);
+		file.write(data, size);
+		file.close();
+	} 
+
+	if (!g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES) || 
+		g_config.getBoolean(ConfigManager::ENABLE_PLAYER_INVENTORY_DATABASE)) {
+		if (!db.executeQuery(fmt::format("DELETE FROM `player_items` WHERE `player_id` = {:d}", player->getGUID()))) {
 			return false;
 		}
 
-		//save depot items
-		if (needsSave) {
+		DBInsert itemsQuery("INSERT INTO `player_items` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
+
+		ItemBlockList itemList;
+		for (int32_t slotId = CONST_SLOT_FIRST; slotId <= CONST_SLOT_LAST; ++slotId) {
+			Item* item = player->inventory[slotId];
+			if (item) {
+				itemList.emplace_back(slotId, item);
+			}
+		}
+
+		if (!saveItems(player, itemList, itemsQuery, propWriteStream)) {
+			return false;
+		}
+	}
+
+	if (!g_config.getBoolean(ConfigManager::ENABLE_PLAYER_DATA_FILES)) {
+		if (player->lastDepotId != -1) {
+			ItemBlockList itemList;
+
+			//save depot items
 			if (!db.executeQuery(fmt::format("DELETE FROM `player_depotitems` WHERE `player_id` = {:d}", player->getGUID()))) {
 				return false;
 			}
@@ -833,8 +817,13 @@ bool IOLoginData::savePlayer(Player* player)
 			DBInsert depotQuery("INSERT INTO `player_depotitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
 			itemList.clear();
 
-			for (const auto& it : player->depotChests) {
+			for (const auto& it : player->depotLockerMap) {
 				for (Item* item : it.second->getItemList()) {
+					if (item == nullptr) {
+						std::cout << "IOLoginData::savePlayer: " << player->getName() << " has an invalid item inside their depot (2)." << std::endl;
+						continue;
+					}
+
 					itemList.emplace_back(it.first, item);
 				}
 			}
@@ -845,38 +834,7 @@ bool IOLoginData::savePlayer(Player* player)
 		}
 	}
 
-	//save inbox items
-	/*if (!db.executeQuery(fmt::format("DELETE FROM `player_inboxitems` WHERE `player_id` = {:d}", player->getGUID()))) {
-		return false;
-	}
-
-	DBInsert inboxQuery("INSERT INTO `player_inboxitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-	itemList.clear();
-
-	for (Item* item : player->getInbox()->getItemList()) {
-		itemList.emplace_back(0, item);
-	}
-
-	if (!saveItems(player, itemList, inboxQuery, propWriteStream)) {
-		return false;
-	}
-
-	//save store inbox items
-	if (!db.executeQuery(fmt::format("DELETE FROM `player_storeinboxitems` WHERE `player_id` = {:d}", player->getGUID()))) {
-		return false;
-	}
-
-	DBInsert storeInboxQuery("INSERT INTO `player_storeinboxitems` (`player_id`, `pid`, `sid`, `itemtype`, `count`, `attributes`) VALUES ");
-	itemList.clear();
-
-	for (Item* item : player->getStoreInbox()->getItemList()) {
-		itemList.emplace_back(0, item);
-	}
-
-	if (!saveItems(player, itemList, storeInboxQuery, propWriteStream)) {
-		return false;
-	}*/
-
+	// Player storage
 	if (!db.executeQuery(fmt::format("DELETE FROM `player_storage` WHERE `player_id` = {:d}", player->getGUID()))) {
 		return false;
 	}
@@ -996,31 +954,22 @@ std::forward_list<VIPEntry> IOLoginData::getVIPEntries(uint32_t accountId)
 {
 	std::forward_list<VIPEntry> entries;
 
-	DBResult_ptr result = Database::getInstance().storeQuery(fmt::format("SELECT `player_id`, (SELECT `name` FROM `players` WHERE `id` = `player_id`) AS `name`, `description`, `icon`, `notify` FROM `account_viplist` WHERE `account_id` = {:d}", accountId));
+	DBResult_ptr result = Database::getInstance().storeQuery(fmt::format("SELECT `player_id`, (SELECT `name` FROM `players` WHERE `id` = `player_id`) AS `name` FROM `account_viplist` WHERE `account_id` = {:d}", accountId));
 	if (result) {
 		do {
 			entries.emplace_front(
 				result->getNumber<uint32_t>("player_id"),
-				result->getString("name"),
-				result->getString("description"),
-				result->getNumber<uint32_t>("icon"),
-				result->getNumber<uint16_t>("notify") != 0
+				result->getString("name")
 			);
 		} while (result->next());
 	}
 	return entries;
 }
 
-void IOLoginData::addVIPEntry(uint32_t accountId, uint32_t guid, const std::string& description, uint32_t icon, bool notify)
+void IOLoginData::addVIPEntry(uint32_t accountId, uint32_t guid)
 {
 	Database& db = Database::getInstance();
-	db.executeQuery(fmt::format("INSERT INTO `account_viplist` (`account_id`, `player_id`, `description`, `icon`, `notify`) VALUES ({:d}, {:d}, {:s}, {:d}, {:d})", accountId, guid, db.escapeString(description), icon, notify));
-}
-
-void IOLoginData::editVIPEntry(uint32_t accountId, uint32_t guid, const std::string& description, uint32_t icon, bool notify)
-{
-	Database& db = Database::getInstance();
-	db.executeQuery(fmt::format("UPDATE `account_viplist` SET `description` = {:s}, `icon` = {:d}, `notify` = {:d} WHERE `account_id` = {:d} AND `player_id` = {:d}", db.escapeString(description), icon, notify, accountId, guid));
+	db.executeQuery(fmt::format("INSERT INTO `account_viplist` (`account_id`, `player_id`) VALUES ({:d}, {:d})", accountId, guid));
 }
 
 void IOLoginData::removeVIPEntry(uint32_t accountId, uint32_t guid)

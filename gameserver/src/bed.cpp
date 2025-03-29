@@ -1,21 +1,5 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
@@ -24,12 +8,9 @@
 #include "iologindata.h"
 #include "scheduler.h"
 
-extern Game g_game;
+#include <fmt/format.h>
 
-BedItem::BedItem(uint16_t id) : Item(id)
-{
-	internalRemoveSleeper();
-}
+extern Game g_game;
 
 Attr_ReadValue BedItem::readAttr(AttrTypes_t attr, PropStream& propStream)
 {
@@ -69,6 +50,8 @@ Attr_ReadValue BedItem::readAttr(AttrTypes_t attr, PropStream& propStream)
 
 void BedItem::serializeAttr(PropWriteStream& propWriteStream) const
 {
+	Item::serializeAttr(propWriteStream);
+
 	if (sleeperGUID != 0) {
 		propWriteStream.write<uint8_t>(ATTR_SLEEPERGUID);
 		propWriteStream.write<uint32_t>(sleeperGUID);
@@ -99,6 +82,11 @@ bool BedItem::canUse(Player* player)
 		return false;
 	}
 
+	const ItemType& iType = Item::items[getID()];
+	if (!(iType.bedPartnerDir == DIRECTION_SOUTH || iType.bedPartnerDir == DIRECTION_EAST)) {
+		return false;
+	}
+
 	if (sleeperGUID == 0) {
 		return true;
 	}
@@ -115,6 +103,7 @@ bool BedItem::canUse(Player* player)
 	if (house->getHouseAccessLevel(&sleeper) > house->getHouseAccessLevel(player)) {
 		return false;
 	}
+
 	return true;
 }
 
@@ -145,13 +134,7 @@ bool BedItem::sleep(Player* player)
 		return false;
 	}
 
-	BedItem* nextBedItem = getNextBedItem();
-
 	internalSetSleeper(player);
-
-	if (nextBedItem) {
-		nextBedItem->internalSetSleeper(player);
-	}
 
 	// update the bedSleepersMap
 	g_game.setBedSleeper(this, player->getGUID());
@@ -159,8 +142,8 @@ bool BedItem::sleep(Player* player)
 	// make the player walk onto the bed
 	g_game.map.moveCreature(*player, *getTile());
 
-	// display 'Zzzz'/sleep effect
-	//g_game.addMagicEffect(player->getPosition(), CONST_ME_SLEEP);
+	// display poff effect
+	g_game.addMagicEffect(player->getPosition(), CONST_ME_POFF);
 
 	// kick player after he sees himself walk onto the bed and it change id
 	uint32_t playerId = player->getID();
@@ -169,7 +152,7 @@ bool BedItem::sleep(Player* player)
 	// change self and partner's appearance
 	updateAppearance(player);
 
-	if (nextBedItem) {
+	if (BedItem* nextBedItem = getNextBedItem()) {
 		nextBedItem->updateAppearance(player);
 	}
 
@@ -183,13 +166,7 @@ void BedItem::wakeUp(Player* player)
 	}
 
 	if (sleeperGUID != 0) {
-		if (!player) {
-			Player regenPlayer(nullptr);
-			if (IOLoginData::loadPlayerById(&regenPlayer, sleeperGUID)) {
-				regeneratePlayer(&regenPlayer);
-				IOLoginData::savePlayer(&regenPlayer);
-			}
-		} else {
+		if (player) {
 			regeneratePlayer(player);
 			g_game.addCreatureHealth(player);
 		}
@@ -218,28 +195,32 @@ void BedItem::wakeUp(Player* player)
 void BedItem::regeneratePlayer(Player* player) const
 {
 	const uint32_t sleptTime = time(nullptr) - sleepStart;
+	int32_t regenTime = sleptTime / 15;
 
 	Condition* condition = player->getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT);
 	if (condition) {
-		uint32_t regen;
 		if (condition->getTicks() != -1) {
-			regen = std::min<int32_t>((condition->getTicks() / 1000), sleptTime) / 30;
-			const int32_t newRegenTicks = condition->getTicks() - (regen * 30000);
+			if ((condition->getTicks() / 1000) / 3 < sleptTime / 15) {
+				regenTime = (condition->getTicks() / 1000) / 3;
+			}
+
+			const int32_t newRegenTicks = condition->getTicks() - (1000 * (3 * regenTime));
 			if (newRegenTicks <= 0) {
 				player->removeCondition(condition);
 			} else {
 				condition->setTicks(newRegenTicks);
 			}
-		} else {
-			regen = sleptTime / 30;
 		}
 
-		player->changeHealth(regen, false);
-		player->changeMana(regen);
+		if (regenTime > 0) {
+			player->changeHealth(regenTime >> 2, false);
+			player->changeMana(regenTime);
+		}
 	}
 
-	const int32_t soulRegen = sleptTime / (60 * 15);
-	player->changeSoul(soulRegen);
+	if (sleptTime > 899) {
+		player->changeSoul(sleptTime / 900);
+	}
 }
 
 void BedItem::updateAppearance(const Player* player)
@@ -273,5 +254,8 @@ void BedItem::internalRemoveSleeper()
 {
 	sleeperGUID = 0;
 	sleepStart = 0;
-	setSpecialDescription("Nobody is sleeping there.");
+
+	if (hasAttribute(ITEM_ATTRIBUTE_DESCRIPTION)) {
+		removeAttribute(ITEM_ATTRIBUTE_DESCRIPTION);
+	}
 }

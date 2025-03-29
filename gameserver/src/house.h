@@ -1,24 +1,7 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_HOUSE_H_EB9732E7771A438F9CD0EFA8CB4C58C4
-#define FS_HOUSE_H_EB9732E7771A438F9CD0EFA8CB4C58C4
+#pragma once
 
 #include <set>
 #include <unordered_set>
@@ -39,7 +22,7 @@ class AccessList
 		void addGuild(const std::string& name);
 		void addGuildRank(const std::string& name, const std::string& rankName);
 
-		bool isInList(const Player* player);
+		bool isInList(const Player* player) const;
 
 		void getList(std::string& list) const;
 
@@ -72,7 +55,7 @@ class Door final : public Item
 
 		//serialization
 		Attr_ReadValue readAttr(AttrTypes_t attr, PropStream& propStream) override;
-		void serializeAttr(PropWriteStream&) const override {}
+		void serializeAttr(PropWriteStream& writeStream) const override;
 
 		void setDoorId(uint32_t doorId) {
 			setIntAttr(ITEM_ATTRIBUTE_DOORID, doorId);
@@ -142,9 +125,9 @@ class House
 		void setAccessList(uint32_t listId, const std::string& textlist);
 		bool getAccessList(uint32_t listId, std::string& list) const;
 
-		bool isInvited(const Player* player);
+		bool isInvited(const Player* player) const;
 
-		AccessHouseLevel_t getHouseAccessLevel(const Player* player);
+		AccessHouseLevel_t getHouseAccessLevel(const Player* player) const;
 		bool kickPlayer(Player* player, Player* target);
 
 		void setEntryPos(Position pos) {
@@ -166,6 +149,13 @@ class House
 			return owner;
 		}
 
+		void setGuildHall(bool gh) {
+			guildHall = gh;
+		}
+		const bool isGuildHall() const {
+			return guildHall;
+		}
+
 		void setPaidUntil(time_t paid) {
 			paidUntil = paid;
 		}
@@ -178,6 +168,13 @@ class House
 		}
 		uint32_t getRent() const {
 			return rent;
+		}
+
+		void setSize(uint32_t size) { 
+			itemTileSize = size;
+		}
+		uint32_t getSize() const {
+			return itemTileSize;
 		}
 
 		void setPayRentWarnings(uint32_t warnings) {
@@ -207,15 +204,22 @@ class House
 		void resetTransferItem();
 		bool executeTransfer(HouseTransferItem* item, Player* newOwner);
 
+		void clearTiles() {
+			houseTiles.clear();
+		}
 		const HouseTileList& getTiles() const {
 			return houseTiles;
 		}
 
+		void clearDoors() {
+			doorSet.clear();
+		}
 		const std::set<Door*>& getDoors() const {
 			return doorSet;
 		}
 
 		void addBed(BedItem* bed);
+		void removeBed(BedItem* bed);
 		const HouseBedItemList& getBeds() const {
 			return bedsList;
 		}
@@ -223,8 +227,8 @@ class House
 			return static_cast<uint32_t>(std::ceil(bedsList.size() / 2.)); //each bed takes 2 sqms of space, ceil is just for bad maps
 		}
 
-	private:
 		bool transferToDepot() const;
+	private:
 		bool transferToDepot(Player* player) const;
 
 		AccessList guestList;
@@ -249,10 +253,12 @@ class House
 		uint32_t rentWarnings = 0;
 		uint32_t rent = 0;
 		uint32_t townId = 0;
+	    uint32_t itemTileSize = 0;
 
 		Position posEntry = {};
 
 		bool isLoaded = false;
+		bool guildHall = false;
 };
 
 using HouseMap = std::map<uint32_t, House*>;
@@ -311,5 +317,3 @@ class Houses
 	private:
 		HouseMap houseMap;
 };
-
-#endif

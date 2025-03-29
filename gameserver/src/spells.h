@@ -1,24 +1,7 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors and Alejandro Mujica for many specific source code changes, All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
-#ifndef FS_SPELLS_H_D78A7CCB7080406E8CAA6B1D31D3DA71
-#define FS_SPELLS_H_D78A7CCB7080406E8CAA6B1D31D3DA71
+#pragma once
 
 #include "luascript.h"
 #include "player.h"
@@ -202,43 +185,18 @@ class Spell : public BaseSpell
 			vocSpellMap[n] = b;
 		}
 
-		const SpellGroup_t getGroup() const {
-			return group;
-		}
-		void setGroup(SpellGroup_t g) {
-			group = g;
-		}
-		const SpellGroup_t getSecondaryGroup() const {
-			return secondaryGroup;
-		}
-		void setSecondaryGroup(SpellGroup_t g) {
-			secondaryGroup = g;
-		}
-
-		uint32_t getCooldown() const {
-			return cooldown;
-		}
-		void setCooldown(uint32_t cd) {
-			cooldown = cd;
-		}
-		uint32_t getSecondaryCooldown() const {
-			return secondaryGroupCooldown;
-		}
-		void setSecondaryCooldown(uint32_t cd) {
-			secondaryGroupCooldown = cd;
-		}
-		uint32_t getGroupCooldown() const {
-			return groupCooldown;
-		}
-		void setGroupCooldown(uint32_t cd) {
-			groupCooldown = cd;
-		}
-
 		int32_t getRange() const {
 			return range;
 		}
 		void setRange(int32_t r) {
 			range = r;
+		}
+
+		uint32_t getCooldown() const {
+			return cooldown;
+		}
+		void setCooldown(uint32_t a) {
+			cooldown = a;
 		}
 
 		bool getNeedTarget() const {
@@ -289,6 +247,12 @@ class Spell : public BaseSpell
 		void setPzLock(bool pzLock) {
 			this->pzLock = pzLock;
 		}
+		bool getCooldownSpellTime() const {
+			return cooldownSpellTime;
+		}
+		void setCooldownSpellTime(bool a) {
+			this->cooldownSpellTime = a;
+		}
 
 		SpellType_t spellType = SPELL_UNDEFINED;
 
@@ -299,12 +263,7 @@ class Spell : public BaseSpell
 
 		VocSpellMap vocSpellMap;
 
-		SpellGroup_t group = SPELLGROUP_NONE;
-		SpellGroup_t secondaryGroup = SPELLGROUP_NONE;
-
-		uint32_t cooldown = 1000;
-		uint32_t groupCooldown = 1000;
-		uint32_t secondaryGroupCooldown = 0;
+		uint32_t cooldown = 2000;
 		uint32_t level = 0;
 		uint32_t magLevel = 0;
 		int32_t range = -1;
@@ -324,9 +283,10 @@ class Spell : public BaseSpell
 		bool blockingCreature = false;
 		bool aggressive = true;
 		bool pzLock = false;
-		bool learnable = false;
+		bool learnable = true;
 		bool enabled = true;
 		bool premium = false;
+		bool cooldownSpellTime = true;
 
 		std::string name;
 };
@@ -409,13 +369,13 @@ class RuneSpell final : public Action, public Spell
 			return targetCreature;
 		}
 
-		bool executeUse(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition, bool isHotkey) override;
+		bool executeUse(Player* player, Item* item, const Position& fromPosition, Thing* target, const Position& toPosition) override;
 
 		bool castSpell(Creature* creature) override;
 		bool castSpell(Creature* creature, Creature* target) override;
 
 		//scripting
-		bool executeCastSpell(Creature* creature, const LuaVariant& var, bool isHotkey);
+		bool executeCastSpell(Creature* creature, const LuaVariant& var);
 
 		bool isInstant() const override {
 			return false;
@@ -439,11 +399,9 @@ class RuneSpell final : public Action, public Spell
 	private:
 		std::string getScriptEventName() const override;
 
-		bool internalCastSpell(Creature* creature, const LuaVariant& var, bool isHotkey);
+		bool internalCastSpell(Creature* creature, const LuaVariant& var);
 
 		uint16_t runeId = 0;
 		uint32_t charges = 0;
 		bool hasCharges = false;
 };
-
-#endif
